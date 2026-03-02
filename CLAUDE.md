@@ -10,14 +10,27 @@ Copilot Clown is a Microsoft Excel Web Add-in (Office.js) that provides an `=USE
 
 ```bash
 npm install              # Install dependencies
-npm run build            # Production build (webpack)
+npm run build            # Production build (webpack, localhost URLs)
 npm run build:dev        # Development build
+npm run build:prod       # Production build with correct URLs via scripts/build.js
 npm run dev              # Start webpack dev server (https://localhost:3000)
 npm run start            # Sideload add-in into Excel for testing
 npm run stop             # Stop the sideloaded add-in
-npm run validate         # Validate manifest.xml
+npm run validate         # Validate dist/manifest.xml
 npm run lint             # ESLint check
 ```
+
+### Production Build for Static Hosting
+
+```bash
+# Build for GitHub Pages (or any static host)
+node scripts/build.js https://username.github.io/copilot_clown
+
+# Or via env var
+BASE_URL=https://example.com npm run build:prod
+```
+
+The `manifest.xml` source uses `{{BASE_URL}}` placeholders. The build script (`scripts/build.js`) or webpack replaces them with the actual hosting URL. Output goes to `dist/`.
 
 ## Architecture
 
@@ -39,7 +52,11 @@ All shared types in `src/types/index.ts` — includes model registry (`CLAUDE_MO
 
 ## Manifest
 
-`manifest.xml` — XML format Office Add-in manifest. The function namespace is `COPILOTCLOWN`, so the full qualified function name in Excel is `=COPILOTCLOWN.USEAI()`. Dev server URL: `https://localhost:3000`.
+`manifest.xml` — XML template with `{{BASE_URL}}` placeholders. The function namespace is `COPILOTCLOWN`, so the full qualified function name in Excel is `=COPILOTCLOWN.USEAI()`. The final manifest with resolved URLs is output to `dist/manifest.xml` during build.
+
+## Deployment
+
+Push to `main` → GitHub Actions (`.github/workflows/deploy.yml`) builds and deploys to GitHub Pages automatically. The workflow infers the Pages URL from the repo name. To sideload in Excel, use `dist/manifest.xml` after building.
 
 ## Anthropic Browser CORS
 

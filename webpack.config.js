@@ -3,6 +3,7 @@ const HtmlWebpackPlugin = require("html-webpack-plugin");
 const CopyWebpackPlugin = require("copy-webpack-plugin");
 
 const isProduction = process.env.NODE_ENV === "production";
+const baseUrl = process.env.BASE_URL || "https://localhost:3000";
 
 module.exports = {
   entry: {
@@ -38,7 +39,13 @@ module.exports = {
     }),
     new CopyWebpackPlugin({
       patterns: [
-        { from: "manifest.xml", to: "manifest.xml" },
+        {
+          from: "manifest.xml",
+          to: "manifest.xml",
+          transform(content) {
+            return content.toString().replace(/\{\{BASE_URL\}\}/g, baseUrl);
+          },
+        },
         { from: "assets", to: "assets", noErrorOnMissing: true },
         { from: "src/functions/functions.json", to: "functions.json" },
       ],
