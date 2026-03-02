@@ -1,0 +1,39 @@
+{
+  "name": "copilot-clown",
+  "version": "1.0.0",
+  "description": "Excel AI Add-in — =USEAI() function powered by Claude and OpenAI",
+  "private": true,
+  "scripts": {
+    "build": "webpack --mode production",
+    "build:dev": "webpack --mode development",
+    "dev": "webpack serve --mode development",
+    "start": "office-addin-debugging start manifest.xml",
+    "stop": "office-addin-debugging stop manifest.xml",
+    "validate": "office-addin-manifest validate manifest.xml",
+    "lint": "eslint src --ext .ts,.tsx",
+    "sideload": "office-addin-dev-certs install && office-addin-debugging start manifest.xml desktop"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/office-js": "^1.0.422",
+    "@types/office-runtime": "^1.0.35",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "copy-webpack-plugin": "^12.0.2",
+    "css-loader": "^7.1.2",
+    "eslint": "^9.17.0",
+    "html-webpack-plugin": "^5.6.3",
+    "office-addin-debugging": "^6.0.6",
+    "office-addin-dev-certs": "^2.0.6",
+    "office-addin-manifest": "^2.1.2",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.7.2",
+    "webpack": "^5.97.1",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.0"
+  }
+}

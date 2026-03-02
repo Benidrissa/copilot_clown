@@ -1,0 +1,28 @@
+{
+  "allowCustomDataForDataTypeAny": true,
+  "functions": [
+    {
+      "id": "USEAI",
+      "name": "USEAI",
+      "description": "Calls an AI language model (Claude or OpenAI) with the given prompt and context. Configure your API key and model in the task pane.",
+      "helpUrl": "https://github.com/copilot-clown",
+      "result": {
+        "type": "any",
+        "dimensionality": "matrix"
+      },
+      "parameters": [
+        {
+          "name": "args",
+          "description": "Alternating prompt parts (text) and context (cell references or ranges). First argument must be a prompt string.",
+          "type": "any",
+          "dimensionality": "matrix",
+          "repeating": true
+        }
+      ],
+      "options": {
+        "requiresAddress": false,
+        "requiresParameterAddresses": false
+      }
+    }
+  ]
+}
