@@ -1,6 +1,17 @@
+# Web
 node_modules/
 dist/
 .env
+
+# .NET
+bin/
+obj/
+*.xll
+*.user
+*.suo
+.vs/
+
+# OS
 *.log
 .DS_Store
 Thumbs.db

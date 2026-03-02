@@ -4,60 +4,67 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Copilot Clown is a Microsoft Excel Web Add-in (Office.js) that provides an `=USEAI()` custom function — a BYOK alternative to Microsoft's `=COPILOT()` function. It supports both Anthropic Claude and OpenAI as LLM providers with localStorage-based response caching.
+Copilot Clown provides an `=USEAI()` custom Excel function — a BYOK alternative to Microsoft's `=COPILOT()`. It supports both Anthropic Claude and OpenAI as LLM providers with response caching. The repo is a monorepo with two autonomous implementations:
 
-## Build & Run Commands
+| Version | Directory | Platform | Technology | Deployment |
+|---------|-----------|----------|------------|------------|
+| **Web** | `web/` | Windows, Mac, Web | Office.js, TypeScript, React | GitHub Pages (static host) |
+| **.NET** | `dotnet/` | Windows only | Excel-DNA, C# .NET 8, WinForms | Self-contained .xll file |
+
+## Web Add-in (`web/`)
 
 ```bash
+cd web
 npm install              # Install dependencies
 npm run build            # Production build (webpack, localhost URLs)
-npm run build:dev        # Development build
 npm run build:prod       # Production build with correct URLs via scripts/build.js
 npm run dev              # Start webpack dev server (https://localhost:3000)
-npm run start            # Sideload add-in into Excel for testing
-npm run stop             # Stop the sideloaded add-in
+npm run start            # Sideload add-in into Excel
 npm run validate         # Validate dist/manifest.xml
 npm run lint             # ESLint check
 ```
 
-### Production Build for Static Hosting
-
+**Static hosting build:**
 ```bash
-# Build for GitHub Pages (or any static host)
 node scripts/build.js https://username.github.io/copilot_clown
-
-# Or via env var
-BASE_URL=https://example.com npm run build:prod
 ```
 
-The `manifest.xml` source uses `{{BASE_URL}}` placeholders. The build script (`scripts/build.js`) or webpack replaces them with the actual hosting URL. Output goes to `dist/`.
+`manifest.xml` uses `{{BASE_URL}}` placeholders replaced at build time. Push to `main` triggers GitHub Actions deploy to Pages.
 
-## Architecture
+**Architecture:** Office.js shared runtime — custom function and task pane share a single JS context. Services instantiated in `functions.ts`, exposed via `window.aillmServices`.
 
-**Shared Runtime** — The add-in uses an Office.js shared runtime, meaning the custom function and task pane run in the same JavaScript context. Services are instantiated once in `functions.ts` and exposed via `window.aillmServices` for the task pane to consume.
+**Key files:**
+- `src/functions/functions.ts` — `=USEAI()` registration via `CustomFunctions.associate()`
+- `src/services/providers/` — `LLMProvider` interface, `ClaudeProvider`, `OpenAIProvider`
+- `src/services/CacheService.ts` — SHA-256 localStorage cache with TTL and LRU eviction
+- `src/services/SettingsService.ts` — localStorage settings, API keys Base64-encoded
+- `src/taskpane/` — React settings UI (API keys, model selector, cache manager)
 
-### Key Components
+**CORS note:** Claude provider sends `anthropic-dangerous-direct-browser-access: true` header for direct browser API calls.
 
-- **`src/functions/functions.ts`** — Registers `=USEAI()` custom function via `CustomFunctions.associate()`. Orchestrates: prompt building → cache check → rate limit → API call → cache store → response parsing (single value or spill array).
-- **`src/services/providers/`** — `LLMProvider` interface with `ClaudeProvider` (Anthropic Messages API) and `OpenAIProvider` (Chat Completions API). Provider factory in `LLMProvider.ts` via `getProvider()`.
-- **`src/services/CacheService.ts`** — SHA-256 hash-keyed localStorage cache with TTL, LRU eviction, and hit/miss stats. Keys prefixed `aillm_cache_`.
-- **`src/services/SettingsService.ts`** — Reads/writes all user config to localStorage. API keys stored Base64-encoded with prefix `aillm_key_`.
-- **`src/services/PromptBuilder.ts`** — Constructs a single prompt string from interleaved text and cell range arguments.
-- **`src/services/RateLimiter.ts`** — In-memory sliding window rate limiter (default: 100 calls / 10 min).
-- **`src/taskpane/`** — React task pane with three sections: API key management, model selection, cache management.
+## .NET Add-in (`dotnet/`)
 
-### Type System
+```bash
+cd dotnet
+dotnet restore           # Restore NuGet packages
+dotnet build             # Build (outputs .xll to bin/)
+dotnet build -c Release  # Release build
+```
 
-All shared types in `src/types/index.ts` — includes model registry (`CLAUDE_MODELS`, `OPENAI_MODELS`), settings defaults, provider/cache interfaces.
+**Output:** `CopilotClown/bin/{Debug|Release}/net8.0-windows/CopilotClown-AddIn64.xll` — drag into Excel or add via File > Options > Add-ins.
 
-## Manifest
+**Architecture:** Excel-DNA .xll add-in. Single self-contained file, no server needed. Uses `ExcelAsyncUtil.Run()` for non-blocking API calls from cells.
 
-`manifest.xml` — XML template with `{{BASE_URL}}` placeholders. The function namespace is `COPILOTCLOWN`, so the full qualified function name in Excel is `=COPILOTCLOWN.USEAI()`. The final manifest with resolved URLs is output to `dist/manifest.xml` during build.
+**Key files:**
+- `CopilotClown/Functions/UseAiFunction.cs` — `[ExcelFunction]` USEAI with 8 params (4 prompt + 4 context). Orchestrates cache → rate limit → API → spill.
+- `CopilotClown/Services/ClaudeProvider.cs` / `OpenAIProvider.cs` — `ILlmProvider` implementations
+- `CopilotClown/Services/CacheService.cs` — `MemoryCache` with SHA-256 keys
+- `CopilotClown/Services/SettingsService.cs` — JSON settings in `%APPDATA%\CopilotClown\`, API keys encrypted via DPAPI
+- `CopilotClown/UI/RibbonController.cs` — Adds "AI Settings" button to Home ribbon tab
+- `CopilotClown/UI/SettingsForm.cs` — WinForms dialog (tabs: API Keys, Model, Cache)
+- `CopilotClown/Models/Models.cs` — `ModelRegistry`, `ProviderName` enum, records
 
-## Deployment
+## Shared
 
-Push to `main` → GitHub Actions (`.github/workflows/deploy.yml`) builds and deploys to GitHub Pages automatically. The workflow infers the Pages URL from the repo name. To sideload in Excel, use `dist/manifest.xml` after building.
-
-## Anthropic Browser CORS
-
-The Claude provider sends `anthropic-dangerous-direct-browser-access: true` header to allow direct browser-to-API calls. This is required because the add-in has no backend proxy.
+- `docs/SRS.md` — Software Requirements Specification (covers both versions)
+- `.github/workflows/deploy.yml` — GitHub Actions: builds and deploys `web/` to GitHub Pages
