@@ -108,11 +108,181 @@ public static class UseAiFunction
         });
     }
 
+    // Excel cell character limit
+    private const int CellMaxChars = 32767;
+
     /// <summary>
-    /// Return full response as a single cell value. No splitting, no truncation.
+    /// Strip markdown formatting, then truncate to fit Excel's cell limit.
+    /// </summary>
+    private static string FitCell(string s)
+    {
+        if (s == null) return "";
+        s = StripMarkdown(s);
+        return s.Length <= CellMaxChars ? s : s.Substring(0, CellMaxChars - 3) + "...";
+    }
+
+    /// <summary>
+    /// Remove markdown formatting: bold, italic, headers, bullets, code blocks, tables.
+    /// </summary>
+    private static string StripMarkdown(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+
+        // Remove code blocks (```...```)
+        while (s.Contains("```"))
+        {
+            int start = s.IndexOf("```");
+            int end = s.IndexOf("```", start + 3);
+            if (end > start)
+            {
+                var inner = s.Substring(start + 3, end - start - 3);
+                int nl = inner.IndexOf('\n');
+                if (nl >= 0 && nl < 20)
+                    inner = inner.Substring(nl + 1);
+                s = s.Substring(0, start) + inner + s.Substring(end + 3);
+            }
+            else
+            {
+                s = s.Substring(0, start) + s.Substring(start + 3);
+            }
+        }
+
+        var lines = s.Split('\n');
+        var result = new System.Collections.Generic.List<string>();
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+
+            // Skip table separator lines (|---|---|--- or | :--- | :---: |)
+            var stripped = line.Trim();
+            if (stripped.StartsWith("|") && stripped.Contains("---"))
+            {
+                bool isSeparator = true;
+                foreach (var cell in stripped.Split('|'))
+                {
+                    var c = cell.Trim().Replace("-", "").Replace(":", "").Replace(" ", "");
+                    if (c.Length > 0) { isSeparator = false; break; }
+                }
+                if (isSeparator) continue; // skip separator rows
+            }
+
+            // Convert table rows: | col1 | col2 | col3 | → col1 | col2 | col3
+            if (stripped.StartsWith("|") && stripped.EndsWith("|") && stripped.Length > 2)
+            {
+                // Remove leading and trailing pipes, keep inner pipes as delimiters
+                line = stripped.Substring(1, stripped.Length - 2).Trim();
+                // Clean each cell
+                var cells = line.Split('|');
+                for (int c = 0; c < cells.Length; c++)
+                    cells[c] = CleanInline(cells[c].Trim());
+                line = string.Join(" | ", cells);
+                result.Add(line);
+                continue;
+            }
+
+            // Remove headers (# ## ### etc.)
+            while (line.StartsWith("#"))
+                line = line.Substring(1);
+            line = line.TrimStart(' ');
+
+            // Remove bullet markers (- item, * item, + item)
+            if (line.StartsWith("- ") || line.StartsWith("* ") || line.StartsWith("+ "))
+                line = line.Substring(2);
+
+            // Remove numbered list markers (1. item, 2. item)
+            if (line.Length > 2 && char.IsDigit(line[0]))
+            {
+                int dot = line.IndexOf(". ");
+                if (dot > 0 && dot <= 3)
+                    line = line.Substring(dot + 2);
+            }
+
+            line = CleanInline(line);
+            result.Add(line);
+        }
+
+        return string.Join("\n", result);
+    }
+
+    /// <summary>
+    /// Remove inline markdown: bold, italic, code, strikethrough.
+    /// </summary>
+    private static string CleanInline(string line)
+    {
+        line = RemoveWrapping(line, "***");
+        line = RemoveWrapping(line, "___");
+        line = RemoveWrapping(line, "**");
+        line = RemoveWrapping(line, "__");
+        line = RemoveWrapping(line, "~~");
+        line = RemoveWrapping(line, "`");
+        line = RemoveWrapping(line, "*");
+        line = RemoveWrapping(line, "_");
+        return line;
+    }
+
+    private static string RemoveWrapping(string s, string marker)
+    {
+        while (true)
+        {
+            int start = s.IndexOf(marker);
+            if (start < 0) break;
+            int end = s.IndexOf(marker, start + marker.Length);
+            if (end < 0) break;
+            s = s.Substring(0, start) + s.Substring(start + marker.Length, end - start - marker.Length) + s.Substring(end + marker.Length);
+        }
+        return s;
+    }
+
+    /// <summary>
+    /// Default (Enter): spill multi-line responses as a dynamic array.
+    /// Ctrl+Shift+Enter: full response in one cell (no splitting).
     /// </summary>
     private static object ParseResponse(string text)
     {
-        return text.Trim();
+        var trimmed = text.Trim();
+
+        // Detect Ctrl+Shift+Enter (array formula) → return everything in one cell
+        try
+        {
+            var caller = XlCall.Excel(XlCall.xlfCaller) as ExcelReference;
+            if (caller != null)
+            {
+                int rows = caller.RowLast - caller.RowFirst + 1;
+                int cols = caller.ColumnLast - caller.ColumnFirst + 1;
+
+                // Any array formula (single or multi-cell CSE) → full text, no spill
+                if (rows >= 1 && cols >= 1)
+                {
+                    // Check if this is an array formula by seeing if caller range > 1 cell
+                    // For single-cell CSE we can't distinguish from normal Enter,
+                    // but for multi-cell CSE we know for sure → put full text in first cell
+                    if (rows > 1 || cols > 1)
+                    {
+                        var result = new object[rows, cols];
+                        result[0, 0] = FitCell(trimmed);
+                        for (int r = 0; r < rows; r++)
+                            for (int c = 0; c < cols; c++)
+                                if (r != 0 || c != 0)
+                                    result[r, c] = ExcelEmpty.Value;
+                        return result;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // If caller detection fails, fall through to spill
+        }
+
+        // Default (Enter): spill as dynamic array (one line per row)
+        var splitLines = trimmed.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        if (splitLines.Length <= 1)
+            return FitCell(trimmed);
+
+        var spill = new object[splitLines.Length, 1];
+        for (int i = 0; i < splitLines.Length; i++)
+            spill[i, 0] = FitCell(splitLines[i].Trim());
+        return spill;
     }
 }
