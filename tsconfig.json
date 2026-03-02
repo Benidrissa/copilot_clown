@@ -4,6 +4,7 @@
     "module": "ES2020",
     "moduleResolution": "node",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "types": ["office-js", "office-runtime", "custom-functions-runtime"],
     "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
