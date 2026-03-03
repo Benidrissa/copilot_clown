@@ -20,16 +20,19 @@ public class OpenAIProvider : ILlmProvider
     public async Task<CompletionResponse> CompleteAsync(
         string prompt, string apiKey, string model, int maxTokens = 8192, CancellationToken ct = default)
     {
+        var maxTokensKey = GetMaxTokensKey(model);
+
         var requestBody = new Dictionary<string, object>
         {
             { "model", model },
-            { "max_tokens", maxTokens },
             { "messages", new[]
                 {
                     new Dictionary<string, object> { { "role", "user" }, { "content", prompt } }
                 }
             }
         };
+
+        requestBody[maxTokensKey] = maxTokens;
 
         var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
         {
@@ -74,5 +77,13 @@ public class OpenAIProvider : ILlmProvider
         {
             return false;
         }
+    }
+
+    private static string GetMaxTokensKey(string model)
+    {
+        // GPT-5.x models expect max_completion_tokens; older models still accept max_tokens.
+        return model.StartsWith("gpt-5", StringComparison.OrdinalIgnoreCase)
+            ? "max_completion_tokens"
+            : "max_tokens";
     }
 }

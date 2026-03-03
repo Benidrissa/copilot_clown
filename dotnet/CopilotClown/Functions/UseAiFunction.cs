@@ -27,9 +27,12 @@ public static class UseAiFunction
     internal static SettingsService SettingsInstance => Settings;
     internal static RateLimiter RateLimiterInstance => RateLimiter;
 
+    // ───────────────────────────────────────────────────────────────
+    //  USEAI  —  spills multi-line responses into separate rows
+    // ───────────────────────────────────────────────────────────────
     [ExcelFunction(
         Name = "USEAI",
-        Description = "Calls an AI language model (Claude or OpenAI) with the given prompt and context. Configure API keys via the ribbon Settings button.",
+        Description = "Calls an AI model and spills the response into separate rows. Use USEAISINGLE to keep everything in one cell.",
         HelpTopic = "https://github.com/Benidrissa/copilot_clown")]
     public static object UseAi(
         [ExcelArgument(Name = "prompt_part1", Description = "Text describing the task or question")] object arg1,
@@ -41,8 +44,34 @@ public static class UseAiFunction
         [ExcelArgument(Name = "prompt_part4", Description = "[Optional] Additional prompt text")] object arg7,
         [ExcelArgument(Name = "context4", Description = "[Optional] Additional context")] object arg8)
     {
-        var args = new[] { arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8 };
+        return CallLlm(new[] { arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8 }, singleCell: false);
+    }
 
+    // ───────────────────────────────────────────────────────────────
+    //  USEAISINGLE  —  returns full response in one cell (with line breaks)
+    // ───────────────────────────────────────────────────────────────
+    [ExcelFunction(
+        Name = "USEAI.SINGLE",
+        Description = "Calls an AI model and returns the full response in a single cell (enable Wrap Text to see all lines).",
+        HelpTopic = "https://github.com/Benidrissa/copilot_clown")]
+    public static object UseAiSingle(
+        [ExcelArgument(Name = "prompt_part1", Description = "Text describing the task or question")] object arg1,
+        [ExcelArgument(Name = "context1", Description = "[Optional] Cell reference or range providing context")] object arg2,
+        [ExcelArgument(Name = "prompt_part2", Description = "[Optional] Additional prompt text")] object arg3,
+        [ExcelArgument(Name = "context2", Description = "[Optional] Additional context")] object arg4,
+        [ExcelArgument(Name = "prompt_part3", Description = "[Optional] Additional prompt text")] object arg5,
+        [ExcelArgument(Name = "context3", Description = "[Optional] Additional context")] object arg6,
+        [ExcelArgument(Name = "prompt_part4", Description = "[Optional] Additional prompt text")] object arg7,
+        [ExcelArgument(Name = "context4", Description = "[Optional] Additional context")] object arg8)
+    {
+        return CallLlm(new[] { arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8 }, singleCell: true);
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    //  Shared implementation
+    // ───────────────────────────────────────────────────────────────
+    private static object CallLlm(object[] args, bool singleCell)
+    {
         // Build prompt
         var prompt = PromptBuilder.Build(args);
         if (string.IsNullOrWhiteSpace(prompt))
@@ -65,12 +94,12 @@ public static class UseAiFunction
         {
             var cached = Cache.Get(provider, model, prompt);
             if (cached != null)
-                return FormatResponse(cached);
+                return FormatResponse(cached, singleCell);
         }
 
         // Use ExcelAsyncUtil for async API call
-        var cacheKey = $"{provider}|{model}|{prompt}";
-        return ExcelAsyncUtil.Run("USEAI", cacheKey, () =>
+        var cacheKey = $"{provider}|{model}|{prompt}|{(singleCell ? "S" : "M")}";
+        return ExcelAsyncUtil.Run(singleCell ? "USEAI.SINGLE" : "USEAI", cacheKey, () =>
         {
             // Rate limit
             RateLimiter.UpdateLimits(settings.RateLimitMax, settings.RateLimitWindowMinutes);
@@ -89,7 +118,7 @@ public static class UseAiFunction
                 if (settings.CacheEnabled)
                     Cache.Set(provider, model, prompt, cleanText, settings.CacheTtlMinutes);
 
-                return FormatResponse(cleanText);
+                return FormatResponse(cleanText, singleCell);
             }
             catch (ApiException ex)
             {
@@ -237,48 +266,22 @@ public static class UseAiFunction
     }
 
     /// <summary>
-    /// Default (Enter): spill multi-line responses as a dynamic array.
-    /// Ctrl+Shift+Enter: full response in one cell (no splitting).
-    /// Input is already markdown-stripped.
+    /// Format the AI response for Excel.
+    /// singleCell=true  → full text in one cell with line breaks (USEAISINGLE).
+    /// singleCell=false → spill as dynamic array (USEAI).
     /// </summary>
-    private static object FormatResponse(string text)
+    private static object FormatResponse(string text, bool singleCell)
     {
         var trimmed = text.Trim();
 
-        // Detect Ctrl+Shift+Enter (array formula) → return everything in one cell
-        try
+        // ── Single-cell mode: return full text with embedded LF (CHAR(10)) ──
+        if (singleCell)
         {
-            var caller = XlCall.Excel(XlCall.xlfCaller) as ExcelReference;
-            if (caller != null)
-            {
-                int rows = caller.RowLast - caller.RowFirst + 1;
-                int cols = caller.ColumnLast - caller.ColumnFirst + 1;
-
-                // Any array formula (single or multi-cell CSE) → full text, no spill
-                if (rows >= 1 && cols >= 1)
-                {
-                    // Check if this is an array formula by seeing if caller range > 1 cell
-                    // For single-cell CSE we can't distinguish from normal Enter,
-                    // but for multi-cell CSE we know for sure → put full text in first cell
-                    if (rows > 1 || cols > 1)
-                    {
-                        var result = new object[rows, cols];
-                        result[0, 0] = FitCell(trimmed);
-                        for (int r = 0; r < rows; r++)
-                            for (int c = 0; c < cols; c++)
-                                if (r != 0 || c != 0)
-                                    result[r, c] = ExcelEmpty.Value;
-                        return result;
-                    }
-                }
-            }
-        }
-        catch
-        {
-            // If caller detection fails, fall through to spill
+            var normalized = trimmed.Replace("\r\n", "\n").Replace("\r", "\n");
+            return FitCell(normalized);
         }
 
-        // Default (Enter): spill as dynamic array
+        // ── Spill mode: split into rows ──
         var splitLines = trimmed.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
         if (splitLines.Length <= 1)
             return FitCell(trimmed);

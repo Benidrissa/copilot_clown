@@ -48,7 +48,7 @@ public class AppSettings
     public bool CacheEnabled { get; set; } = true;
     public int CacheTtlMinutes { get; set; } = 1440; // 24 hours
     public int CacheMaxEntries { get; set; } = 1000;
-    public int RateLimitMax { get; set; } = 100;
+    public int RateLimitMax { get; set; } = 500;
     public int RateLimitWindowMinutes { get; set; } = 10;
     public int ApiTimeoutSeconds { get; set; } = 30;
 }
