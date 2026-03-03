@@ -10,6 +10,7 @@ namespace CopilotClown.Services;
 public class CacheService
 {
     private static readonly MemoryCache Cache = MemoryCache.Default;
+    private static readonly SHA256 Sha = SHA256.Create();
     private long _hits;
     private long _misses;
 
@@ -36,8 +37,6 @@ public class CacheService
 
     public void Clear()
     {
-        // MemoryCache doesn't have a Clear method — dispose and recreate is not possible
-        // with the default instance, so we trim 100% of entries
         Cache.Trim(100);
         Interlocked.Exchange(ref _hits, 0);
         Interlocked.Exchange(ref _misses, 0);
@@ -55,12 +54,14 @@ public class CacheService
 
     private static string BuildKey(ProviderName provider, string model, string prompt)
     {
-        var data = $"{provider}|{model}|{prompt}";
+        // For long prompts, fingerprint instead of hashing the entire string
+        var fingerprint = prompt.Length <= 2048
+            ? prompt
+            : string.Concat(prompt.Length.ToString(), prompt.Substring(0, 512), prompt.Substring(prompt.Length - 512));
+
+        var data = Encoding.UTF8.GetBytes(string.Concat(provider.ToString(), "|", model, "|", fingerprint));
         byte[] hash;
-        using (var sha = SHA256.Create())
-        {
-            hash = sha.ComputeHash(Encoding.UTF8.GetBytes(data));
-        }
+        lock (Sha) { hash = Sha.ComputeHash(data); }
         return "aillm_" + BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
     }
 }

@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+using System.Text;
 
 namespace CopilotClown.Services;
 
@@ -6,71 +6,77 @@ public static class PromptBuilder
 {
     /// <summary>
     /// Build a prompt string from the variadic arguments passed to =USEAI().
-    /// Arguments alternate between prompt text (string) and context values.
-    /// Context from Excel ranges arrives as object[,] (2D array).
+    /// Uses StringBuilder to minimize allocations.
     /// </summary>
     public static string Build(object[] args)
     {
         if (args.Length == 0) return "";
 
-        var parts = new List<string>();
+        var sb = new StringBuilder(256);
 
         foreach (var arg in args)
         {
             switch (arg)
             {
                 case string s:
-                    parts.Add(s);
+                    if (sb.Length > 0) sb.Append(' ');
+                    sb.Append(s);
                     break;
                 case double d:
-                    parts.Add(d.ToString("G"));
+                    if (sb.Length > 0) sb.Append(' ');
+                    sb.Append(d.ToString("G"));
                     break;
                 case bool b:
-                    parts.Add(b.ToString());
+                    if (sb.Length > 0) sb.Append(' ');
+                    sb.Append(b);
                     break;
                 case object[,] range:
-                    parts.Add(FlattenRange(range));
+                    if (sb.Length > 0) sb.Append(' ');
+                    FlattenRange(range, sb);
                     break;
                 case ExcelDna.Integration.ExcelMissing:
-                    // Skip missing optional arguments
-                    break;
                 case ExcelDna.Integration.ExcelEmpty:
-                    // Skip empty cells
                     break;
                 default:
                     if (arg != null)
-                        parts.Add(arg.ToString() ?? "");
+                    {
+                        if (sb.Length > 0) sb.Append(' ');
+                        sb.Append(arg);
+                    }
                     break;
             }
         }
 
-        return string.Join(" ", parts).Trim();
+        return sb.ToString().Trim();
     }
 
-    private static string FlattenRange(object[,] range)
+    private static void FlattenRange(object[,] range, StringBuilder sb)
     {
         var rows = range.GetLength(0);
         var cols = range.GetLength(1);
+        if (rows == 0 || cols == 0) return;
 
-        if (rows == 0 || cols == 0) return "";
-
-        var lines = new List<string>();
-
+        bool firstLine = true;
         for (int r = 0; r < rows; r++)
         {
-            var cells = new List<string>();
+            bool hasContent = false;
+            var lineStart = sb.Length;
+
+            if (!firstLine) sb.Append('\n');
+
             for (int c = 0; c < cols; c++)
             {
                 var val = range[r, c];
-                if (val is not ExcelDna.Integration.ExcelEmpty and not null)
-                    cells.Add(val.ToString() ?? "");
+                if (val is ExcelDna.Integration.ExcelEmpty || val == null) continue;
+                if (hasContent) sb.Append(", ");
+                sb.Append(val);
+                hasContent = true;
             }
-            if (cells.Count > 0)
-            {
-                lines.Add(cols == 1 ? cells[0] : string.Join(", ", cells));
-            }
-        }
 
-        return string.Join("\n", lines);
+            if (!hasContent)
+                sb.Length = lineStart; // Remove the newline we added
+            else
+                firstLine = false;
+        }
     }
 }

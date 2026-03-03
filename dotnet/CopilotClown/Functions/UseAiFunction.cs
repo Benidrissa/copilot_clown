@@ -60,12 +60,12 @@ public static class UseAiFunction
         if (string.IsNullOrEmpty(apiKey))
             return $"Error: No API key configured for {provider}. Click 'AI Settings' in the ribbon.";
 
-        // Check cache
+        // Check cache (cached values are already markdown-stripped)
         if (settings.CacheEnabled)
         {
             var cached = Cache.Get(provider, model, prompt);
             if (cached != null)
-                return ParseResponse(cached);
+                return FormatResponse(cached);
         }
 
         // Use ExcelAsyncUtil for async API call
@@ -83,11 +83,13 @@ public static class UseAiFunction
                 var result = llm.CompleteAsync(prompt, apiKey, model, ct: CancellationToken.None)
                     .GetAwaiter().GetResult();
 
-                // Cache the result
-                if (settings.CacheEnabled)
-                    Cache.Set(provider, model, prompt, result.Text, settings.CacheTtlMinutes);
+                // Strip markdown ONCE, then cache the clean version
+                var cleanText = StripMarkdown(result.Text.Trim());
 
-                return ParseResponse(result.Text);
+                if (settings.CacheEnabled)
+                    Cache.Set(provider, model, prompt, cleanText, settings.CacheTtlMinutes);
+
+                return FormatResponse(cleanText);
             }
             catch (ApiException ex)
             {
@@ -112,12 +114,12 @@ public static class UseAiFunction
     private const int CellMaxChars = 32767;
 
     /// <summary>
-    /// Strip markdown formatting, then truncate to fit Excel's cell limit.
+    /// Truncate to fit Excel's 32,767 char cell limit. No markdown stripping here
+    /// (already stripped before caching).
     /// </summary>
     private static string FitCell(string s)
     {
         if (s == null) return "";
-        s = StripMarkdown(s);
         return s.Length <= CellMaxChars ? s : s.Substring(0, CellMaxChars - 3) + "...";
     }
 
@@ -237,8 +239,9 @@ public static class UseAiFunction
     /// <summary>
     /// Default (Enter): spill multi-line responses as a dynamic array.
     /// Ctrl+Shift+Enter: full response in one cell (no splitting).
+    /// Input is already markdown-stripped.
     /// </summary>
-    private static object ParseResponse(string text)
+    private static object FormatResponse(string text)
     {
         var trimmed = text.Trim();
 
@@ -275,11 +278,53 @@ public static class UseAiFunction
             // If caller detection fails, fall through to spill
         }
 
-        // Default (Enter): spill as dynamic array (one line per row)
+        // Default (Enter): spill as dynamic array
         var splitLines = trimmed.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
         if (splitLines.Length <= 1)
             return FitCell(trimmed);
 
+        // Detect tabular data: if most lines contain " | ", split into 2D array
+        int pipeLineCount = 0;
+        int maxCols = 1;
+        for (int i = 0; i < splitLines.Length; i++)
+        {
+            if (splitLines[i].Contains(" | "))
+            {
+                pipeLineCount++;
+                var colCount = splitLines[i].Split(new[] { " | " }, StringSplitOptions.None).Length;
+                if (colCount > maxCols) maxCols = colCount;
+            }
+        }
+
+        // If majority of lines are pipe-delimited, return as 2D table
+        if (pipeLineCount > splitLines.Length / 2 && maxCols > 1)
+        {
+            var table = new object[splitLines.Length, maxCols];
+            for (int r = 0; r < splitLines.Length; r++)
+            {
+                var cells = splitLines[r].Trim().Split(new[] { " | " }, StringSplitOptions.None);
+                for (int c = 0; c < maxCols; c++)
+                {
+                    if (c < cells.Length)
+                    {
+                        var val = cells[c].Trim().Trim('"');
+                        // Try to parse as number for Excel
+                        if (double.TryParse(val, System.Globalization.NumberStyles.Any,
+                            System.Globalization.CultureInfo.InvariantCulture, out double num))
+                            table[r, c] = num;
+                        else
+                            table[r, c] = FitCell(val);
+                    }
+                    else
+                    {
+                        table[r, c] = ExcelEmpty.Value;
+                    }
+                }
+            }
+            return table;
+        }
+
+        // Non-tabular: spill as single column
         var spill = new object[splitLines.Length, 1];
         for (int i = 0; i < splitLines.Length; i++)
             spill[i, 0] = FitCell(splitLines[i].Trim());
