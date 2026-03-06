@@ -1,6 +1,7 @@
 using System;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using ExcelDna.Integration;
@@ -14,6 +15,9 @@ public static class UseAiFunction
     private static readonly CacheService Cache = new CacheService();
     private static readonly SettingsService Settings = new SettingsService();
     private static readonly RateLimiter RateLimiter = new RateLimiter();
+    private static readonly ContentCache FileCache = new ContentCache();
+    private static readonly FileUploadCache UploadCache = new FileUploadCache();
+    private static readonly FileResolver Resolver = new FileResolver(FileCache);
 
     // Force TLS 1.2 — required by both Anthropic and OpenAI APIs.
     // .NET Framework 4.8 doesn't always enable this by default.
@@ -26,6 +30,8 @@ public static class UseAiFunction
     internal static CacheService CacheInstance => Cache;
     internal static SettingsService SettingsInstance => Settings;
     internal static RateLimiter RateLimiterInstance => RateLimiter;
+    internal static ContentCache FileCacheInstance => FileCache;
+    internal static FileUploadCache UploadCacheInstance => UploadCache;
 
     // ───────────────────────────────────────────────────────────────
     //  USEAI  —  spills multi-line responses into separate rows
@@ -89,17 +95,31 @@ public static class UseAiFunction
         if (string.IsNullOrEmpty(apiKey))
             return $"Error: No API key configured for {provider}. Click 'AI Settings' in the ribbon.";
 
+        // Resolve file/folder/URL references enclosed in { }
+        ResolvedPrompt resolved;
+        try
+        {
+            resolved = Resolver.Resolve(prompt);
+        }
+        catch (Exception ex)
+        {
+            return $"Error resolving file references: {ex.Message}";
+        }
+
+        // Build cache key that includes attachment identity
+        var cachePromptKey = BuildCachePromptKey(resolved);
+
         // Check cache (cached values are already markdown-stripped)
         if (settings.CacheEnabled)
         {
-            var cached = Cache.Get(provider, model, prompt);
+            var cached = Cache.Get(provider, model, cachePromptKey);
             if (cached != null)
                 return FormatResponse(cached, singleCell);
         }
 
         // Use ExcelAsyncUtil for async API call
-        var cacheKey = $"{provider}|{model}|{prompt}|{(singleCell ? "S" : "M")}";
-        return ExcelAsyncUtil.Run(singleCell ? "USEAI.SINGLE" : "USEAI", cacheKey, () =>
+        var asyncKey = $"{provider}|{model}|{cachePromptKey}|{(singleCell ? "S" : "M")}";
+        return ExcelAsyncUtil.Run(singleCell ? "USEAI.SINGLE" : "USEAI", asyncKey, () =>
         {
             // Rate limit
             RateLimiter.UpdateLimits(settings.RateLimitMax, settings.RateLimitWindowMinutes);
@@ -109,14 +129,19 @@ public static class UseAiFunction
             try
             {
                 var llm = ProviderFactory.Get(provider);
-                var result = llm.CompleteAsync(prompt, apiKey, model, ct: CancellationToken.None)
+
+                // Upload attachments to API if not already uploaded (Layer 2 cache)
+                if (resolved.HasAttachments)
+                    UploadAttachments(llm, resolved, provider, apiKey);
+
+                var result = llm.CompleteAsync(resolved, apiKey, model, ct: CancellationToken.None)
                     .GetAwaiter().GetResult();
 
                 // Strip markdown ONCE, then cache the clean version
                 var cleanText = StripMarkdown(result.Text.Trim());
 
                 if (settings.CacheEnabled)
-                    Cache.Set(provider, model, prompt, cleanText, settings.CacheTtlMinutes);
+                    Cache.Set(provider, model, cachePromptKey, cleanText, settings.CacheTtlMinutes);
 
                 return FormatResponse(cleanText, singleCell);
             }
@@ -137,6 +162,90 @@ public static class UseAiFunction
                 return (object)$"Error: {ex.Message}";
             }
         });
+    }
+
+    private static string BuildCachePromptKey(ResolvedPrompt resolved)
+    {
+        if (!resolved.HasAttachments)
+            return resolved.CleanText;
+
+        var sb = new StringBuilder(resolved.CleanText);
+        foreach (var att in resolved.Attachments)
+        {
+            sb.Append('|');
+            sb.Append(att.SourcePath);
+            sb.Append(':');
+            sb.Append(att.Content.Length);
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Upload attachments to the provider's Files API if not already cached.
+    /// Sets RemoteFileId on each attachment so providers use file_id references.
+    /// Falls back silently to inline content on upload failure.
+    /// </summary>
+    private static void UploadAttachments(ILlmProvider llm, ResolvedPrompt resolved, ProviderName provider, string apiKey)
+    {
+        foreach (var att in resolved.Attachments)
+        {
+            try
+            {
+                // Check if already uploaded
+                var cachedFileId = IsUrl(att.SourcePath)
+                    ? UploadCache.GetUrl(provider, att.SourcePath)
+                    : UploadCache.Get(provider, att.SourcePath);
+
+                if (cachedFileId != null)
+                {
+                    att.RemoteFileId = cachedFileId;
+                    continue;
+                }
+
+                // Get raw bytes for upload
+                byte[] fileBytes;
+                if (att.RawBytes != null)
+                {
+                    fileBytes = att.RawBytes;
+                }
+                else if (att.Type == AttachmentType.Image)
+                {
+                    fileBytes = Convert.FromBase64String(att.Content);
+                }
+                else if (System.IO.File.Exists(att.SourcePath))
+                {
+                    fileBytes = System.IO.File.ReadAllBytes(att.SourcePath);
+                }
+                else
+                {
+                    // Can't upload without raw bytes — use inline fallback
+                    continue;
+                }
+
+                var fileId = llm.UploadFileAsync(fileBytes, att.FileName, att.MimeType, apiKey)
+                    .GetAwaiter().GetResult();
+
+                if (!string.IsNullOrEmpty(fileId))
+                {
+                    att.RemoteFileId = fileId;
+
+                    if (IsUrl(att.SourcePath))
+                        UploadCache.SetUrl(provider, att.SourcePath, fileId);
+                    else
+                        UploadCache.Set(provider, att.SourcePath, fileId);
+                }
+            }
+            catch
+            {
+                // Upload failed — provider will use inline content as fallback
+            }
+        }
+    }
+
+    private static bool IsUrl(string path)
+    {
+        return path != null && (path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
     }
 
     // Excel cell character limit

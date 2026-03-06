@@ -158,11 +158,19 @@ public class SettingsForm : Form
         layout.Controls.Add(_cboCacheTtl);
 
         var btnPanel = new FlowLayoutPanel { AutoSize = true };
-        var btnClear = new Button { Text = "Clear All Cache", Width = 120, ForeColor = Color.DarkRed };
+        var btnClear = new Button { Text = "Clear API Cache", Width = 120, ForeColor = Color.DarkRed };
         btnClear.Click += (s, e) => { _cache.Clear(); RefreshCacheStats(); };
+        var btnClearFiles = new Button { Text = "Clear File Cache", Width = 120, ForeColor = Color.DarkRed };
+        btnClearFiles.Click += (s, e) =>
+        {
+            UseAiFunction.FileCacheInstance.Clear();
+            UseAiFunction.UploadCacheInstance.Clear();
+            RefreshCacheStats();
+            MessageBox.Show("File content and upload caches cleared.", "Cleared", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        };
         var btnSaveCache = new Button { Text = "Save Settings", Width = 120 };
         btnSaveCache.Click += (s, e) => SaveCacheSettings();
-        btnPanel.Controls.AddRange(new Control[] { btnClear, btnSaveCache });
+        btnPanel.Controls.AddRange(new Control[] { btnClear, btnClearFiles, btnSaveCache });
         layout.Controls.Add(btnPanel);
 
         page.Controls.Add(layout);

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -17,14 +19,31 @@ public class ClaudeProvider : ILlmProvider
 
     public ModelInfo[] GetModels() => ModelRegistry.ClaudeModels;
 
-    public async Task<CompletionResponse> CompleteAsync(
+    public Task<CompletionResponse> CompleteAsync(
         string prompt, string apiKey, string model, int maxTokens = 8192, CancellationToken ct = default)
     {
+        return CompleteAsync(new ResolvedPrompt(prompt), apiKey, model, maxTokens, ct);
+    }
+
+    public async Task<CompletionResponse> CompleteAsync(
+        ResolvedPrompt prompt, string apiKey, string model, int maxTokens = 8192, CancellationToken ct = default)
+    {
+        object content;
+
+        if (!prompt.HasAttachments)
+        {
+            content = prompt.CleanText;
+        }
+        else
+        {
+            content = BuildMultimodalContent(prompt);
+        }
+
         var requestBody = new Dictionary<string, object>
         {
             { "model", model },
             { "max_tokens", maxTokens },
-            { "messages", new[] { new Dictionary<string, object> { { "role", "user" }, { "content", prompt } } } }
+            { "messages", new[] { new Dictionary<string, object> { { "role", "user" }, { "content", content } } } }
         };
 
         var request = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages")
@@ -33,6 +52,8 @@ public class ClaudeProvider : ILlmProvider
         };
         request.Headers.Add("x-api-key", apiKey);
         request.Headers.Add("anthropic-version", "2023-06-01");
+        // Required for file_id references in content blocks
+        request.Headers.Add("anthropic-beta", "files-api-2025-04-14");
 
         var response = await Http.SendAsync(request, ct);
 
@@ -58,6 +79,32 @@ public class ClaudeProvider : ILlmProvider
         return new CompletionResponse(text, inputTokens, outputTokens);
     }
 
+    public async Task<string> UploadFileAsync(byte[] fileBytes, string fileName, string mimeType, string apiKey, CancellationToken ct = default)
+    {
+        var boundary = "----CopilotClown" + Guid.NewGuid().ToString("N");
+        using (var formContent = new MultipartFormDataContent(boundary))
+        {
+            var fileContent = new ByteArrayContent(fileBytes);
+            fileContent.Headers.ContentType = new MediaTypeHeaderValue(mimeType);
+            formContent.Add(fileContent, "file", fileName);
+
+            var request = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/files")
+            {
+                Content = formContent
+            };
+            request.Headers.Add("x-api-key", apiKey);
+            request.Headers.Add("anthropic-version", "2023-06-01");
+            request.Headers.Add("anthropic-beta", "files-api-2025-04-14");
+
+            var response = await Http.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync();
+            var root = JsonHelper.Parse(json);
+            return JsonHelper.GetString(root, "id");
+        }
+    }
+
     public async Task<bool> ValidateKeyAsync(string apiKey, CancellationToken ct = default)
     {
         try
@@ -69,6 +116,84 @@ public class ClaudeProvider : ILlmProvider
         {
             return false;
         }
+    }
+
+    private static object[] BuildMultimodalContent(ResolvedPrompt prompt)
+    {
+        var blocks = new List<object>();
+        var cacheControl = new Dictionary<string, object> { { "type", "ephemeral" } };
+
+        // Document attachments: prefer file_id, fall back to inline text
+        foreach (var att in prompt.Attachments.Where(a => a.Type == AttachmentType.Text))
+        {
+            if (!string.IsNullOrEmpty(att.RemoteFileId))
+            {
+                // Use API-uploaded file reference (avoids re-sending content)
+                blocks.Add(new Dictionary<string, object>
+                {
+                    { "type", "document" },
+                    { "source", new Dictionary<string, object>
+                        {
+                            { "type", "file" },
+                            { "file_id", att.RemoteFileId }
+                        }
+                    },
+                    { "cache_control", cacheControl }
+                });
+            }
+            else
+            {
+                // Inline text fallback
+                blocks.Add(new Dictionary<string, object>
+                {
+                    { "type", "text" },
+                    { "text", $"--- Content from {att.FileName} ---\n{att.Content}\n--- End ---\n" },
+                    { "cache_control", cacheControl }
+                });
+            }
+        }
+
+        // Image attachments: prefer file_id, fall back to base64
+        foreach (var att in prompt.Attachments.Where(a => a.Type == AttachmentType.Image))
+        {
+            if (!string.IsNullOrEmpty(att.RemoteFileId))
+            {
+                blocks.Add(new Dictionary<string, object>
+                {
+                    { "type", "image" },
+                    { "source", new Dictionary<string, object>
+                        {
+                            { "type", "file" },
+                            { "file_id", att.RemoteFileId }
+                        }
+                    },
+                    { "cache_control", cacheControl }
+                });
+            }
+            else
+            {
+                blocks.Add(new Dictionary<string, object>
+                {
+                    { "type", "image" },
+                    { "source", new Dictionary<string, object>
+                        {
+                            { "type", "base64" },
+                            { "media_type", att.MimeType },
+                            { "data", att.Content }
+                        }
+                    }
+                });
+            }
+        }
+
+        // User prompt text (always last)
+        blocks.Add(new Dictionary<string, object>
+        {
+            { "type", "text" },
+            { "text", prompt.CleanText }
+        });
+
+        return blocks.ToArray();
     }
 }
 

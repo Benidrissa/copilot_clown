@@ -234,7 +234,132 @@ The settings dialog is a WinForms form with tabbed sections:
 - TTL configuration input (default: 24 hours)
 - Toggle to enable/disable caching globally
 
-### 3.5 Rate Limiting
+### 3.5 File and Folder Content Attachment
+
+#### 3.5.1 Overview
+
+Users can reference local files, folders, and web URLs directly within prompt text by enclosing paths in curly braces `{ }`. The add-in auto-detects these references, extracts content (text or image), and attaches it to the API request.
+
+#### 3.5.2 Syntax
+
+File and folder references are enclosed in curly braces within the prompt:
+
+```
+=USEAI("Summarize {C:\reports\Q4.pdf}")
+=USEAI("Describe {C:\photos\chart.png}")
+=USEAI("Analyze all docs in {C:\reports\quarterly\}")
+=USEAI("Summarize {https://example.com/report.pdf}")
+```
+
+#### 3.5.3 Supported File Types
+
+| Category | Extensions | Processing |
+|----------|-----------|------------|
+| **Documents** | `.docx` | Text extraction via OpenXml (paragraph text) |
+| **PDF** | `.pdf` | Text extraction via PdfPig; OCR fallback (Tesseract) for scanned pages |
+| **Images** | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp` | Base64-encoded, sent as multimodal content block |
+| **Plain text** | `.txt`, `.csv`, `.md`, `.json`, `.xml`, `.html`, `.htm`, `.log`, `.yaml`, `.yml` | Read as-is (UTF-8, max 1 MB) |
+
+Unsupported file types are silently skipped.
+
+#### 3.5.4 Folder Processing
+
+- Folders are processed **recursively** (all subfolders included)
+- Maximum **50 files** per folder reference (alphabetical order)
+- Only supported file types are included; others are skipped
+- Path replaced with `[attached: N files from foldername]`
+
+#### 3.5.5 URL Support
+
+- HTTP/HTTPS URLs are downloaded via `HttpClient`
+- Content type determined from HTTP `Content-Type` header or URL extension
+- Maximum download size: **50 MB**
+- Processed identically to local files after download
+
+#### 3.5.6 Multimodal API Content
+
+When attachments include images, the API request uses a multimodal content array:
+
+- **Anthropic Claude:** `content` becomes an array of `{"type":"text",...}` and `{"type":"image","source":{"type":"base64",...}}` blocks. When a `file_id` is available (see §3.6), file references are used instead: `{"type":"document","source":{"type":"file","file_id":"..."}}` or `{"type":"image","source":{"type":"file","file_id":"..."}}`. Prompt caching (`cache_control`) is applied to attachment blocks.
+- **OpenAI:** `content` becomes an array of `{"type":"text",...}` and `{"type":"image_url","image_url":{"url":"data:mime;base64,..."}}` blocks. When a `file_id` is available, file references are used: `{"type":"file","file":{"file_id":"..."}}`.
+- **Text-only attachments:** Document text is prepended to the prompt as `--- Content from filename ---` sections; no multimodal array needed
+
+#### 3.5.7 File Content Caching
+
+- Extracted file content is cached in a dedicated `MemoryCache` ("FileContent"), separate from API response cache
+- **Local files:** Cached indefinitely (until user clears cache). Cache key includes `LastWriteTimeUtc`, so modified files are automatically re-extracted
+- **URLs:** Cached with configurable TTL (default: 24 hours)
+- File content cache can be cleared independently via the Settings dialog
+- The API response cache key includes attachment metadata (source path + content length) so that file changes invalidate cached API responses
+
+#### 3.5.8 OCR (Optical Character Recognition)
+
+- PDF pages with no extractable text (or fewer than 10 characters) are treated as scanned
+- Scanned pages are OCR'd using Tesseract engine (English language)
+- Tesseract data files (`eng.traineddata`) are located via: assembly directory → `TESSDATA_PREFIX` environment variable → `Program Files\Tesseract-OCR\tessdata`
+- If OCR is unavailable, a warning message is returned inline: `[OCR unavailable: ...]`
+
+#### 3.5.9 Error Handling
+
+File resolution is best-effort — errors never prevent the API call:
+
+| Scenario | Behavior |
+|----------|----------|
+| File not found | `[Warning: file not found]` inline |
+| Unsupported extension | Skipped silently |
+| Extraction failure | `[Error: could not read file: reason]` inline |
+| URL download failure | `[Error: could not download: reason]` inline |
+| Image > 20 MB | Skipped with warning |
+| Folder > 50 files | First 50 processed, warning added |
+| OCR failure | `[OCR error: reason]` inline |
+
+### 3.6 API File Upload Caching
+
+#### 3.6.1 Overview
+
+To avoid re-uploading the same file on every API call, files are uploaded once to each provider's Files API and the returned `file_id` is cached. Subsequent requests reference the `file_id` instead of re-sending content inline.
+
+#### 3.6.2 Provider File Upload APIs
+
+| Provider | Endpoint | Auth | Purpose Field | Returns |
+|----------|----------|------|---------------|---------|
+| **Anthropic Claude** | `POST https://api.anthropic.com/v1/files` | `x-api-key` + `anthropic-beta: files-api-2025-04-14` | — | `file_id` |
+| **OpenAI** | `POST https://api.openai.com/v1/files` | `Authorization: Bearer` | `purpose: "user_data"` | `file_id` |
+
+Both APIs accept multipart form-data uploads with the file bytes and filename.
+
+#### 3.6.3 File Reference Formats
+
+| Provider | Document Reference | Image Reference |
+|----------|-------------------|-----------------|
+| **Claude** | `{"type":"document","source":{"type":"file","file_id":"..."},"cache_control":{"type":"ephemeral"}}` | `{"type":"image","source":{"type":"file","file_id":"..."},"cache_control":{"type":"ephemeral"}}` |
+| **OpenAI** | `{"type":"file","file":{"file_id":"..."}}` | `{"type":"file","file":{"file_id":"..."}}` |
+
+#### 3.6.4 Claude Prompt Caching
+
+Anthropic's prompt caching is enabled on all attachment content blocks via `"cache_control": {"type": "ephemeral"}`. This provides up to 90% cost reduction when the same files are referenced in subsequent API calls within the caching window.
+
+#### 3.6.5 Upload Flow
+
+1. Before calling the completion API, each attachment is checked against `FileUploadCache`
+2. **Cache hit:** `file_id` is set on the attachment; no upload needed
+3. **Cache miss:** File bytes are uploaded to the provider's Files API; returned `file_id` is cached
+4. **Upload failure:** Falls back silently to inline content (base64 or text)
+5. The provider's completion request uses `file_id` references where available
+
+#### 3.6.6 File Upload Cache
+
+| Aspect | Detail |
+|--------|--------|
+| **Cache name** | `"FileUpload"` (separate `MemoryCache` instance) |
+| **Local file key** | `upload_{provider}_{normalized_path}_{LastWriteTimeUtc.Ticks}` |
+| **URL key** | `upload_{provider}_url_{url}` |
+| **Local file TTL** | Infinite (until user clears or file modified → different key) |
+| **URL TTL** | 24 hours |
+| **Value** | Remote `file_id` string |
+| **Eviction** | Manual clear via Settings dialog ("Clear File Cache" button) |
+
+### 3.7 Rate Limiting
 
 - Client-side rate limiter: configurable limit (default 500 calls per 10 minutes)
 - Uses a sliding window counter stored in memory
@@ -328,11 +453,12 @@ The settings dialog is a WinForms form with tabbed sections:
 1. User enters `=USEAI("Summarize", A1:A10)` in a cell
 2. Excel calls the registered `[ExcelFunction]` handler
 3. **PromptBuilder** resolves cell references / ranges and constructs the full prompt string
-4. **CacheService** computes SHA-256 hash of `{ provider, model, prompt }` and checks `MemoryCache`
-5. **Cache hit:** Return cached response immediately (already markdown-stripped)
-6. **Cache miss:** `ExcelAsyncUtil.Run()` dispatches async work → **RateLimiter** checks call budget → **ILlmProvider** sends HTTP request
-7. Response is markdown-stripped, cached, and formatted for Excel (single value or 2D array)
-8. If `USEAI`: multi-line responses spill as rows; tabular (pipe-delimited) responses spill as 2D arrays with numeric parsing. If `USEAI.SINGLE`: full text returned in one cell with embedded line breaks.
+4. **FileResolver** detects `{...}` references in the prompt, extracts file/URL content (checking **ContentCache** first), and returns a `ResolvedPrompt` with clean text + attachments
+5. **CacheService** computes SHA-256 hash of `{ provider, model, prompt + attachment metadata }` and checks `MemoryCache`
+6. **Cache hit:** Return cached response immediately (already markdown-stripped)
+7. **Cache miss:** `ExcelAsyncUtil.Run()` dispatches async work → **RateLimiter** checks call budget → **FileUploadCache** checks if attachments need uploading (uploads via Files API if not cached) → **ILlmProvider** sends HTTP request (using `file_id` references or inline content)
+8. Response is markdown-stripped, cached, and formatted for Excel (single value or 2D array)
+9. If `USEAI`: multi-line responses spill as rows; tabular (pipe-delimited) responses spill as 2D arrays with numeric parsing. If `USEAI.SINGLE`: full text returned in one cell with embedded line breaks.
 
 ### 5.3 Excel-DNA Architecture
 
@@ -499,7 +625,18 @@ The cache uses `System.Runtime.Caching.MemoryCache` (in-process). Cache entries 
 | Caching enabled | `true` | `true` / `false` |
 | Max cache entries | 1000 | 100 – 10,000 |
 
-### 8.5 Cache Management (Settings Dialog)
+### 8.5 File Content Cache
+
+| Aspect | Detail |
+|--------|--------|
+| **Cache name** | `"FileContent"` (separate `MemoryCache` instance) |
+| **Local file key** | `file_{normalized_path}_{LastWriteTimeUtc.Ticks}` |
+| **URL key** | `url_{url}` |
+| **Local file TTL** | Infinite (until user clears or file modified → different key) |
+| **URL TTL** | Configurable (default: 24 hours) |
+| **Eviction** | Manual clear via Settings dialog |
+
+### 8.6 Cache Management (Settings Dialog)
 
 - **Stats display:** Total entries, hits, misses, hit rate
 - **Clear cache:** Trims `MemoryCache` (removes all entries)
@@ -531,6 +668,24 @@ The cache uses `System.Runtime.Caching.MemoryCache` (in-process). Cache entries 
 
 ' Single-cell summary
 =USEAI.SINGLE("Summarize this data in 2 sentences:", B1:B50)
+
+' File attachment — PDF document
+=USEAI("Summarize {C:\reports\Q4-2025.pdf}")
+
+' File attachment — Word document
+=USEAI("Extract key findings from {C:\docs\analysis.docx}")
+
+' File attachment — image (sent as multimodal content)
+=USEAI("Describe what you see in {C:\photos\chart.png}")
+
+' Folder attachment — all supported files recursively
+=USEAI("Summarize all reports in {C:\reports\quarterly\}")
+
+' URL attachment — remote document
+=USEAI("Summarize {https://example.com/report.pdf}")
+
+' Mixed — file + text context
+=USEAI("Compare {C:\old-report.pdf} with this data:", A1:A20)
 ```
 
 ## Appendix B: Settings File Location

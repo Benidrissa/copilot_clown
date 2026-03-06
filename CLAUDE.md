@@ -31,13 +31,17 @@ dotnet build -c Release  # Release build
 ## Key files
 
 **Functions:**
-- `CopilotClown/Functions/UseAiFunction.cs` — `[ExcelFunction]` USEAI (spill) and USEAI.SINGLE (single cell), 8 params each (4 prompt + 4 context). Orchestrates cache → rate limit → API → markdown strip → format (1D column, 2D table, or single cell). Also contains `StripMarkdown()` and `FormatResponse()`.
+- `CopilotClown/Functions/UseAiFunction.cs` — `[ExcelFunction]` USEAI (spill) and USEAI.SINGLE (single cell), 8 params each (4 prompt + 4 context). Orchestrates file resolve → cache → rate limit → file upload → API → markdown strip → format (1D column, 2D table, or single cell). Also contains `StripMarkdown()` and `FormatResponse()`.
 
 **Services:**
 - `CopilotClown/Services/LlmProvider.cs` — `ILlmProvider` interface + `ProviderFactory` (dictionary lookup)
-- `CopilotClown/Services/ClaudeProvider.cs` — Anthropic Messages API. No system prompt. Default `max_tokens: 8192`.
-- `CopilotClown/Services/OpenAIProvider.cs` — OpenAI Chat Completions API. No system prompt. GPT-5.x uses `max_completion_tokens`; older models use `max_tokens`.
+- `CopilotClown/Services/ClaudeProvider.cs` — Anthropic Messages API. No system prompt. Default `max_tokens: 8192`. Supports multimodal content (text + images). File upload via Files API (`/v1/files`, `anthropic-beta: files-api-2025-04-14`). Prompt caching (`cache_control: ephemeral`) on attachment blocks.
+- `CopilotClown/Services/OpenAIProvider.cs` — OpenAI Chat Completions API. No system prompt. GPT-5.x uses `max_completion_tokens`; older models use `max_tokens`. Supports multimodal content (text + images). File upload via Files API (`/v1/files`, `purpose: user_data`).
 - `CopilotClown/Services/CacheService.cs` — `MemoryCache` with SHA-256 keys. Fingerprints prompts >2048 chars. Thread-safe hit/miss counters.
+- `CopilotClown/Services/FileResolver.cs` — Detects `{...}` file/folder/URL references in prompts, delegates extraction to `ContentExtractor`, returns `ResolvedPrompt`. Recursive folder support (max 50 files).
+- `CopilotClown/Services/ContentExtractor.cs` — Extracts text from `.docx` (OpenXml), `.pdf` (PdfPig + Tesseract OCR for scanned pages), plain text files. Images read as base64. URL download via `HttpClient`.
+- `CopilotClown/Services/ContentCache.cs` — Separate `MemoryCache` for extracted file content. Local files cached until cleared (key includes `LastWriteTimeUtc`). URLs cached with configurable TTL.
+- `CopilotClown/Services/FileUploadCache.cs` — Maps `(provider, sourcePath, lastModified)` → remote `file_id`. Avoids re-uploading files to provider APIs. Local files infinite TTL (key includes `LastWriteTimeUtc`). URLs 24h TTL. Thread-safe counters.
 - `CopilotClown/Services/SettingsService.cs` — JSON settings in `%APPDATA%\CopilotClown\settings.json`, API keys DPAPI-encrypted in `keys.dat`. In-memory cache with 5s TTL to avoid disk I/O per cell.
 - `CopilotClown/Services/PromptBuilder.cs` — Static `Build(object[] args)`. Handles `string`, `double`, `bool`, `object[,]` ranges, `ExcelMissing`/`ExcelEmpty`. Uses `StringBuilder`.
 - `CopilotClown/Services/RateLimiter.cs` — Sliding-window rate limiter (default 500 calls / 10 min).
@@ -49,6 +53,7 @@ dotnet build -c Release  # Release build
 
 **Models:**
 - `CopilotClown/Models/Models.cs` — `ProviderName` enum, `ModelInfo`, `CompletionResponse`, `AppSettings` (defaults: OpenAI/gpt-5.2, cache 24h, rate limit 500/10min), `ModelRegistry` (9 Claude models, 20 OpenAI models).
+- `CopilotClown/Models/ContentModels.cs` — `AttachmentType` enum, `Attachment` (type, content, mime, source, `RemoteFileId`, `RawBytes`), `ResolvedPrompt` (clean text + attachments list).
 
 ## Docs
 
