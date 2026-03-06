@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -14,7 +15,7 @@ public static class UseAiFunction
 {
     private static readonly CacheService Cache = new CacheService();
     private static readonly SettingsService Settings = new SettingsService();
-    private static readonly RateLimiter RateLimiter = new RateLimiter();
+    private static readonly ConcurrentDictionary<ProviderName, RateLimiter> RateLimiters = new ConcurrentDictionary<ProviderName, RateLimiter>();
     private static readonly ContentCache FileCache = new ContentCache();
     private static readonly FileUploadCache UploadCache = new FileUploadCache();
     private static readonly FileResolver Resolver = new FileResolver(FileCache);
@@ -29,7 +30,8 @@ public static class UseAiFunction
     // Expose services for the settings UI
     internal static CacheService CacheInstance => Cache;
     internal static SettingsService SettingsInstance => Settings;
-    internal static RateLimiter RateLimiterInstance => RateLimiter;
+    internal static RateLimiter GetRateLimiter(ProviderName p) =>
+        RateLimiters.GetOrAdd(p, _ => new RateLimiter());
     internal static ContentCache FileCacheInstance => FileCache;
     internal static FileUploadCache UploadCacheInstance => UploadCache;
 
@@ -112,22 +114,33 @@ public static class UseAiFunction
         // Check cache (cached values are already markdown-stripped)
         if (settings.CacheEnabled)
         {
-            var cached = Cache.Get(provider, model, cachePromptKey);
+            var cached = Cache.Get(cachePromptKey);
             if (cached != null)
                 return FormatResponse(cached, singleCell);
         }
 
         // Use ExcelAsyncUtil.Observe for async API call with "Loading..." indicator
-        var asyncKey = $"{provider}|{model}|{cachePromptKey}|{(singleCell ? "S" : "M")}";
+        var asyncKey = $"{cachePromptKey}|{(singleCell ? "S" : "M")}";
         return ExcelAsyncUtil.Observe(
             singleCell ? "USEAI.SINGLE" : "USEAI",
             asyncKey,
             () => new LoadingObservable(() =>
             {
-                // Rate limit
-                RateLimiter.UpdateLimits(settings.RateLimitMax, settings.RateLimitWindowMinutes);
-                if (!RateLimiter.TryAcquire())
-                    return (object)"Error: Rate limit exceeded. Wait and try again.";
+                // Double-check cache inside the observable — prevents API calls
+                // when Excel recalculates (e.g. row delete) and Observe() creates
+                // a new subscription even though the result is already cached.
+                if (settings.CacheEnabled)
+                {
+                    var cached = Cache.Get(cachePromptKey);
+                    if (cached != null)
+                        return FormatResponse(cached, singleCell);
+                }
+
+                // Rate limit (per provider)
+                var limiter = GetRateLimiter(provider);
+                limiter.UpdateLimits(settings.RateLimitMax, settings.RateLimitWindowMinutes);
+                if (!limiter.TryAcquire())
+                    return (object)$"Error: {provider} rate limit exceeded. Wait and try again.";
 
                 try
                 {
@@ -144,7 +157,7 @@ public static class UseAiFunction
                     var cleanText = StripMarkdown(result.Text.Trim());
 
                     if (settings.CacheEnabled)
-                        Cache.Set(provider, model, cachePromptKey, cleanText, settings.CacheTtlMinutes);
+                        Cache.Set(cachePromptKey, cleanText, settings.CacheTtlMinutes);
 
                     return FormatResponse(cleanText, singleCell);
                 }
