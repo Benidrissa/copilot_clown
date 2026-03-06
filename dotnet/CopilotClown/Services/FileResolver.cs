@@ -38,8 +38,12 @@ public class FileResolver
 
         foreach (Match match in matches)
         {
-            var fullMatch = match.Value;          // e.g. {C:\docs\file.pdf}
-            var reference = match.Groups[1].Value; // e.g. C:\docs\file.pdf
+            var fullMatch = match.Value;                    // e.g. {C:\docs\file.pdf}
+            var reference = match.Groups[1].Value.Trim();  // e.g. C:\docs\file.pdf
+
+            // Strip surrounding quotes: {"C:\path with spaces"} → C:\path with spaces
+            if (reference.Length >= 2 && reference[0] == '"' && reference[reference.Length - 1] == '"')
+                reference = reference.Substring(1, reference.Length - 2).Trim();
 
             string replacement;
             try
@@ -59,11 +63,13 @@ public class FileResolver
                 }
                 else if (Directory.Exists(reference))
                 {
-                    var folderFiles = ResolveFolder(reference);
+                    string diagnostic;
+                    var folderFiles = ResolveFolder(reference, out diagnostic);
                     attachments.AddRange(folderFiles);
+                    var folderName = Path.GetFileName(reference.TrimEnd('\\', '/'));
                     replacement = folderFiles.Count > 0
-                        ? $"[attached: {folderFiles.Count} files from {Path.GetFileName(reference.TrimEnd('\\', '/'))}]"
-                        : $"[folder: {reference} — no supported files found]";
+                        ? $"[attached: {folderFiles.Count} files from {folderName}]"
+                        : $"[folder: {folderName} — no supported files ({diagnostic})]";
                 }
                 else if (File.Exists(reference))
                 {
@@ -78,9 +84,13 @@ public class FileResolver
                         replacement = $"[Error: unsupported file type {Path.GetExtension(reference)}]";
                     }
                 }
+                else if (LooksLikePath(reference))
+                {
+                    replacement = $"[Warning: path not found: {reference}]";
+                }
                 else
                 {
-                    // Not a valid file/folder/URL — leave as-is (might be intentional {braces})
+                    // Not a path or URL — leave as-is (might be intentional {braces})
                     continue;
                 }
             }
@@ -130,15 +140,17 @@ public class FileResolver
         return result;
     }
 
-    private List<Attachment> ResolveFolder(string folderPath)
+    private List<Attachment> ResolveFolder(string folderPath, out string diagnostic)
     {
         var results = new List<Attachment>();
-        var files = Directory.EnumerateFiles(folderPath, "*.*", SearchOption.AllDirectories)
-            .Where(f => ContentExtractor.IsSupported(Path.GetExtension(f)))
-            .Take(MaxFilesPerFolder)
-            .ToList();
+        var allFiles = new List<string>();
+        var errors = new List<string>();
+        int totalScanned = 0;
+        int dirsScanned = 0;
 
-        foreach (var file in files)
+        SafeCollectFiles(folderPath, allFiles, MaxFilesPerFolder, ref totalScanned, ref dirsScanned, errors);
+
+        foreach (var file in allFiles)
         {
             try
             {
@@ -146,18 +158,102 @@ public class FileResolver
                 if (resolved != null)
                     results.Add(resolved);
             }
-            catch
+            catch (Exception ex)
             {
-                // Skip files that can't be processed
+                errors.Add($"extract({Path.GetFileName(file)}): {ex.Message}");
             }
         }
 
+        var diag = $"scanned {totalScanned} files in {dirsScanned} dirs, {allFiles.Count} supported";
+        if (errors.Count > 0)
+            diag += $"; errors: {string.Join("; ", errors)}";
+        diagnostic = diag;
+
         return results;
+    }
+
+    /// <summary>
+    /// Recursively collect supported files into a list, skipping directories
+    /// that throw (access denied, OneDrive cloud-only, long paths, etc.).
+    /// Uses Directory.GetFiles/GetDirectories (eager, not lazy) so exceptions
+    /// are caught at call time. Errors are recorded for diagnostics.
+    /// </summary>
+    private static void SafeCollectFiles(string dir, List<string> results, int maxFiles,
+        ref int totalScanned, ref int dirsScanned, List<string> errors)
+    {
+        if (results.Count >= maxFiles)
+            return;
+
+        dirsScanned++;
+
+        // Collect files in current directory
+        string[] files = null;
+        try
+        {
+            files = Directory.GetFiles(dir);
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"GetFiles({Path.GetFileName(dir)}): {ex.GetType().Name}: {ex.Message}");
+        }
+
+        if (files != null)
+        {
+            foreach (var file in files)
+            {
+                totalScanned++;
+                if (results.Count >= maxFiles) return;
+                if (ContentExtractor.IsSupported(Path.GetExtension(file)))
+                    results.Add(file);
+            }
+        }
+
+        // Recurse into subdirectories
+        string[] subdirs = null;
+        try
+        {
+            subdirs = Directory.GetDirectories(dir);
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"GetDirs({Path.GetFileName(dir)}): {ex.GetType().Name}: {ex.Message}");
+        }
+
+        if (subdirs != null)
+        {
+            foreach (var subdir in subdirs)
+            {
+                if (results.Count >= maxFiles) return;
+                SafeCollectFiles(subdir, results, maxFiles, ref totalScanned, ref dirsScanned, errors);
+            }
+        }
     }
 
     private static bool IsUrl(string reference)
     {
         return reference.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
             || reference.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Heuristic: does this look like a file/folder path (drive letter, UNC, or rooted)?
+    /// Used to give a "not found" warning instead of silently ignoring.
+    /// </summary>
+    private static bool LooksLikePath(string reference)
+    {
+        // Drive letter path: C:\... or C:/...
+        if (reference.Length >= 3 && char.IsLetter(reference[0]) && reference[1] == ':'
+            && (reference[2] == '\\' || reference[2] == '/'))
+            return true;
+
+        // UNC path: \\server\...
+        if (reference.StartsWith("\\\\"))
+            return true;
+
+        // Rooted path: \something or /something
+        if (reference.Length > 1 && (reference[0] == '\\' || reference[0] == '/'))
+            return true;
+
+        return false;
     }
 }

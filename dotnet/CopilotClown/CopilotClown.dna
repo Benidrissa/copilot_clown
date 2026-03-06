@@ -1,4 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <DnaLibrary Name="Copilot Clown" RuntimeVersion="v4.0" xmlns="http://schemas.excel-dna.net/addin/2020/07/dnalibrary">
   <ExternalLibrary Path="CopilotClown.dll" ExplicitExports="false" ExplicitRegistration="false" LoadFromBytes="true" Pack="true" ComServer="true" />
+
+  <!-- PDF extraction (PdfPig) -->
+  <Reference Path="UglyToad.PdfPig.dll" Pack="true" />
+  <Reference Path="UglyToad.PdfPig.Core.dll" Pack="true" />
+  <Reference Path="UglyToad.PdfPig.Fonts.dll" Pack="true" />
+  <Reference Path="UglyToad.PdfPig.Tokenization.dll" Pack="true" />
+  <Reference Path="UglyToad.PdfPig.Tokens.dll" Pack="true" />
+  <Reference Path="UglyToad.PdfPig.DocumentLayoutAnalysis.dll" Pack="true" />
+  <Reference Path="UglyToad.PdfPig.Package.dll" Pack="true" />
+
+  <!-- Word document extraction (OpenXml) -->
+  <Reference Path="DocumentFormat.OpenXml.dll" Pack="true" />
+  <Reference Path="DocumentFormat.OpenXml.Framework.dll" Pack="true" />
+
+  <!-- OCR for scanned PDFs (Tesseract) -->
+  <Reference Path="Tesseract.dll" Pack="true" />
+
+  <!-- .NET Framework polyfill assemblies required by PdfPig/OpenXml -->
+  <Reference Path="System.Memory.dll" Pack="true" />
+  <Reference Path="System.Buffers.dll" Pack="true" />
+  <Reference Path="System.Numerics.Vectors.dll" Pack="true" />
+  <Reference Path="System.Runtime.CompilerServices.Unsafe.dll" Pack="true" />
+  <Reference Path="Microsoft.Bcl.HashCode.dll" Pack="true" />
 </DnaLibrary>
