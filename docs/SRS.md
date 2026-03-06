@@ -197,9 +197,9 @@ The model list is hardcoded but designed for easy extension via a registry patte
 
 #### 3.2.3 Provider Switching
 
-- The user selects the active provider and model from the task pane
-- The selection persists across sessions via localStorage
-- All `=USEAI()` calls use the currently active provider/model
+- The user selects the active provider and model from the settings dialog (Home ribbon > "AI Settings")
+- The selection persists across sessions via `%APPDATA%\CopilotClown\settings.json`
+- All `=USEAI()` and `=USEAI.SINGLE()` calls use the currently active provider/model
 - Changing provider/model does **not** automatically recalculate existing formulas
 
 ### 3.3 API Key Management
@@ -250,7 +250,7 @@ The settings dialog is a WinForms form with tabbed sections:
 | Metric | Target |
 |--------|--------|
 | Cache lookup time | < 5 ms |
-| UI responsiveness | Task pane loads in < 1 second |
+| UI responsiveness | Settings dialog opens in < 1 second |
 | API call timeout | 30 seconds (configurable) |
 | Function registration | < 500 ms on Excel startup |
 
@@ -288,27 +288,27 @@ The settings dialog is a WinForms form with tabbed sections:
 │                    Excel Workbook                         │
 │                                                           │
 │  ┌──────────────┐    ┌──────────────────────────────┐    │
-│  │  =USEAI()    │    │       Task Pane (React)       │    │
-│  │  Custom Fn   │    │  ┌────────────────────────┐   │    │
-│  │              │    │  │  API Key Settings       │   │    │
+│  │  =USEAI()    │    │  Settings Dialog (WinForms)   │    │
+│  │  =USEAI.     │    │  ┌────────────────────────┐   │    │
+│  │    SINGLE()  │    │  │  API Key Settings       │   │    │
 │  └──────┬───────┘    │  │  Model Selector         │   │    │
 │         │            │  │  Cache Manager           │   │    │
 │         │            │  └────────────────────────┘   │    │
 │         │            └──────────────┬────────────────┘    │
-│         │    Shared Runtime (JS)    │                     │
+│         │  Excel-DNA .xll (.NET 4.8)│                     │
 │  ┌──────▼───────────────────────────▼──────────────┐     │
 │  │                                                  │     │
 │  │  ┌──────────────┐  ┌────────────────────────┐   │     │
 │  │  │ PromptBuilder│  │   SettingsService      │   │     │
-│  │  └──────┬───────┘  │   (localStorage)       │   │     │
+│  │  └──────┬───────┘  │   (%APPDATA% + DPAPI)  │   │     │
 │  │         │          └────────────────────────┘   │     │
 │  │  ┌──────▼───────────────────────────────────┐   │     │
 │  │  │           CacheService                    │   │     │
-│  │  │    (SHA-256 hash → localStorage)          │   │     │
+│  │  │    (SHA-256 hash → MemoryCache)           │   │     │
 │  │  └──────┬───────────────────────────────────┘   │     │
 │  │         │ (cache miss)                          │     │
 │  │  ┌──────▼───────────────────────────────────┐   │     │
-│  │  │        LLM Provider (abstract)            │   │     │
+│  │  │        ILlmProvider (interface)           │   │     │
 │  │  │  ┌───────────────┐ ┌──────────────────┐  │   │     │
 │  │  │  │ClaudeProvider │ │ OpenAIProvider    │  │   │     │
 │  │  │  └───────┬───────┘ └────────┬─────────┘  │   │     │
@@ -326,21 +326,25 @@ The settings dialog is a WinForms form with tabbed sections:
 ### 5.2 Data Flow
 
 1. User enters `=USEAI("Summarize", A1:A10)` in a cell
-2. Excel calls the registered custom function handler
-3. **PromptBuilder** resolves cell references and constructs the full prompt string
-4. **CacheService** computes SHA-256 hash of `{ provider, model, prompt }` and checks localStorage
-5. **Cache hit:** Return stored response immediately
-6. **Cache miss:** **RateLimiter** checks call budget → **LLMProvider** sends API request
-7. Response is stored in cache and returned to the cell
-8. If response contains multiple items, it is returned as a 2D array (spill)
+2. Excel calls the registered `[ExcelFunction]` handler
+3. **PromptBuilder** resolves cell references / ranges and constructs the full prompt string
+4. **CacheService** computes SHA-256 hash of `{ provider, model, prompt }` and checks `MemoryCache`
+5. **Cache hit:** Return cached response immediately (already markdown-stripped)
+6. **Cache miss:** `ExcelAsyncUtil.Run()` dispatches async work → **RateLimiter** checks call budget → **ILlmProvider** sends HTTP request
+7. Response is markdown-stripped, cached, and formatted for Excel (single value or 2D array)
+8. If `USEAI`: multi-line responses spill as rows; tabular (pipe-delimited) responses spill as 2D arrays with numeric parsing. If `USEAI.SINGLE`: full text returned in one cell with embedded line breaks.
 
-### 5.3 Shared Runtime Architecture
+### 5.3 Excel-DNA Architecture
 
-The add-in uses an Office.js **Shared Runtime** so that:
-- Custom functions and the task pane share the same JavaScript execution context
-- Settings changed in the task pane (API key, model) are immediately available to custom functions via `window` globals
-- `localStorage` is accessible from both custom functions and the task pane
-- No need for cross-runtime messaging or `OfficeRuntime.storage`
+The add-in uses **Excel-DNA** (.NET Framework 4.8):
+- Functions are marked with `[ExcelFunction]` attributes and compiled into a `.xll` file
+- `ExcelAsyncUtil.Run()` enables non-blocking API calls — Excel shows `#BUSY!` during execution
+- The ".xll" packages all dependencies into a single file (`ExcelDnaPackCompressResources`)
+- The ribbon is extended with an "AI Settings" button via `ExcelRibbon` / `CustomUI`
+- A fallback `[ExcelCommand]` macro (Alt+F8 > `ShowAISettings`) is registered in case the ribbon doesn't load
+- Settings and API keys persist to `%APPDATA%\CopilotClown\` on disk
+- JSON serialization uses `JavaScriptSerializer` (built into .NET 4.8, zero NuGet dependencies)
+- Cache uses `System.Runtime.Caching.MemoryCache` (in-process, not persisted across sessions)
 
 ---
 
@@ -361,16 +365,17 @@ content-type: application/json
 ```json
 {
   "model": "claude-sonnet-4-20250514",
-  "max_tokens": 4096,
+  "max_tokens": 8192,
   "messages": [
     {
       "role": "user",
       "content": "<constructed_prompt>"
     }
-  ],
-  "system": "You are a helpful assistant embedded in Microsoft Excel. Respond concisely and directly. When asked to produce a list, return one item per line with no numbering or bullets unless requested. Do not add explanations unless asked."
+  ]
 }
 ```
+
+Note: No `system` message is sent by the .NET provider. The `max_tokens` default is 8192.
 
 **Response (extract):**
 ```json
@@ -398,12 +403,23 @@ Content-type: application/json
 ```json
 {
   "model": "gpt-4.1-mini",
-  "max_tokens": 4096,
+  "max_tokens": 8192,
   "messages": [
     {
-      "role": "system",
-      "content": "You are a helpful assistant embedded in Microsoft Excel. Respond concisely and directly. When asked to produce a list, return one item per line with no numbering or bullets unless requested. Do not add explanations unless asked."
-    },
+      "role": "user",
+      "content": "<constructed_prompt>"
+    }
+  ]
+}
+```
+
+Note: GPT-5.x models use `max_completion_tokens` instead of `max_tokens`. No `system` message is sent by the .NET provider. The `max_tokens` default is 8192.
+
+```json
+{
+  "model": "gpt-5.2",
+  "max_completion_tokens": 8192,
+  "messages": [
     {
       "role": "user",
       "content": "<constructed_prompt>"
@@ -495,7 +511,7 @@ The cache uses `System.Runtime.Caching.MemoryCache` (in-process). Cache entries 
 ## Appendix A: Function Examples
 
 ```excel
-' Simple prompt
+' Simple prompt (spills multi-line response into rows)
 =USEAI("List 5 popular programming languages")
 
 ' With cell context
@@ -509,6 +525,12 @@ The cache uses `System.Runtime.Caching.MemoryCache` (in-process). Cache entries 
 
 ' Translation
 =USEAI("Translate to French:", A2)
+
+' Full response in one cell (use Wrap Text to see all lines)
+=USEAI.SINGLE("Write a paragraph about:", A2)
+
+' Single-cell summary
+=USEAI.SINGLE("Summarize this data in 2 sentences:", B1:B50)
 ```
 
 ## Appendix B: Settings File Location
