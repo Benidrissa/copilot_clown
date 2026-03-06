@@ -26,12 +26,12 @@ dotnet build -c Release  # Release build
 
 **Installer:** `installer/build-installer.ps1` runs `dotnet build -c Release` then compiles an Inno Setup installer (`CopilotClown.iss`) → `installer/Output/CopilotClownSetup.exe`.
 
-**Architecture:** Excel-DNA .xll add-in. Single self-contained file (all deps packed), no server needed. Uses `ExcelAsyncUtil.Run()` for non-blocking API calls from cells. Forces TLS 1.2/1.3. JSON via built-in `JavaScriptSerializer` (zero NuGet JSON deps).
+**Architecture:** Excel-DNA .xll add-in. Single self-contained file (all deps packed), no server needed. Uses `ExcelAsyncUtil.Observe()` with `IExcelObservable` for non-blocking API calls from cells (shows "Loading..." during processing). Forces TLS 1.2/1.3. JSON via built-in `JavaScriptSerializer` (zero NuGet JSON deps).
 
 ## Key files
 
 **Functions:**
-- `CopilotClown/Functions/UseAiFunction.cs` — `[ExcelFunction]` USEAI (spill) and USEAI.SINGLE (single cell), 8 params each (4 prompt + 4 context). Orchestrates file resolve → cache → rate limit → file upload → API → markdown strip → format (1D column, 2D table, or single cell). Also contains `StripMarkdown()` and `FormatResponse()`.
+- `CopilotClown/Functions/UseAiFunction.cs` — `[ExcelFunction]` USEAI (spill) and USEAI.SINGLE (single cell), 8 params each (4 prompt + 4 context). Orchestrates file resolve → cache → rate limit → file upload → API → markdown strip → format (1D column, 2D table, or single cell). Contains `LoadingObservable` (IExcelObservable for "Loading..." indicator), `StripMarkdown()`, and `FormatResponse()`.
 
 **Services:**
 - `CopilotClown/Services/LlmProvider.cs` — `ILlmProvider` interface + `ProviderFactory` (dictionary lookup)
@@ -48,8 +48,8 @@ dotnet build -c Release  # Release build
 - `CopilotClown/Services/JsonHelper.cs` — Thin wrapper around `JavaScriptSerializer` with dot-path navigation (`GetValue`, `GetString`, `GetInt`).
 
 **UI:**
-- `CopilotClown/UI/RibbonController.cs` — Adds "AI Settings" button to Home ribbon tab via `ExcelRibbon`. Also registers `[ExcelCommand]` `ShowAISettings` as Alt+F8 fallback.
-- `CopilotClown/UI/SettingsForm.cs` — WinForms dialog with 3 tabs: API Keys (save/test per provider), Model (provider radio + model dropdown with context window/pricing info), Cache (enable/disable, TTL dropdown, stats, clear).
+- `CopilotClown/UI/RibbonController.cs` — Adds "AI Settings" and "Convert to Values" buttons to Home ribbon tab via `ExcelRibbon`. Also registers `[ExcelCommand]` `ShowAISettings` as Alt+F8 fallback.
+- `CopilotClown/UI/SettingsForm.cs` — WinForms dialog with 4 tabs: API Keys (save/test per provider), Model (provider radio + model dropdown with context window/pricing info), Cache (enable/disable, TTL dropdown, stats, clear), Tools (convert USEAI formulas to values for sharing).
 
 **Models:**
 - `CopilotClown/Models/Models.cs` — `ProviderName` enum, `ModelInfo`, `CompletionResponse`, `AppSettings` (defaults: OpenAI/gpt-5.2, cache 24h, rate limit 500/10min), `ModelRegistry` (9 Claude models, 20 OpenAI models).

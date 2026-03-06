@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using ExcelDna.Integration;
 using CopilotClown.Functions;
 using CopilotClown.Models;
 using CopilotClown.Services;
@@ -30,6 +31,9 @@ public class SettingsForm : Form
     private ComboBox _cboCacheTtl;
     private CheckBox _chkCacheEnabled;
 
+    // Tools tab
+    private Label _lblToolsStatus;
+
     public SettingsForm()
     {
         _settings = UseAiFunction.SettingsInstance;
@@ -51,6 +55,7 @@ public class SettingsForm : Form
         tabs.TabPages.Add(CreateApiKeysTab());
         tabs.TabPages.Add(CreateModelTab());
         tabs.TabPages.Add(CreateCacheTab());
+        tabs.TabPages.Add(CreateToolsTab());
 
         Controls.Add(tabs);
     }
@@ -175,6 +180,115 @@ public class SettingsForm : Form
 
         page.Controls.Add(layout);
         return page;
+    }
+
+    // ── Tools Tab ─────────────────────────────────────────────────
+
+    private TabPage CreateToolsTab()
+    {
+        var page = new TabPage("Tools") { Padding = new Padding(12) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+
+        layout.Controls.Add(new Label
+        {
+            Text = "Share Workbook",
+            AutoSize = true,
+            Font = new Font(Font, FontStyle.Bold),
+        });
+
+        layout.Controls.Add(new Label
+        {
+            Text = "Convert USEAI formulas to plain values so the workbook\ncan be shared with users who don't have the add-in installed.",
+            AutoSize = true,
+        });
+
+        var btnPanel = new FlowLayoutPanel { AutoSize = true };
+
+        var btnConvertSelected = new Button { Text = "Convert Selected Cells", Width = 160 };
+        btnConvertSelected.Click += (s, e) => ConvertSelectedCells();
+
+        var btnConvertAll = new Button { Text = "Convert All USEAI Cells", Width = 170 };
+        btnConvertAll.Click += (s, e) => ConvertAllUseAiCells();
+
+        btnPanel.Controls.AddRange(new Control[] { btnConvertSelected, btnConvertAll });
+        layout.Controls.Add(btnPanel);
+
+        _lblToolsStatus = new Label { AutoSize = true, ForeColor = Color.Gray, Text = "" };
+        layout.Controls.Add(_lblToolsStatus);
+
+        page.Controls.Add(layout);
+        return page;
+    }
+
+    private void ConvertSelectedCells()
+    {
+        try
+        {
+            dynamic app = ExcelDnaUtil.Application;
+            dynamic selection = app.Selection;
+            selection.Value2 = selection.Value2;
+
+            _lblToolsStatus.Text = "Selected cells converted to values.";
+            _lblToolsStatus.ForeColor = Color.Green;
+        }
+        catch (Exception ex)
+        {
+            _lblToolsStatus.Text = $"Error: {ex.Message}";
+            _lblToolsStatus.ForeColor = Color.Red;
+        }
+    }
+
+    private void ConvertAllUseAiCells()
+    {
+        try
+        {
+            dynamic app = ExcelDnaUtil.Application;
+            dynamic workbook = app.ActiveWorkbook;
+
+            if (workbook == null)
+            {
+                _lblToolsStatus.Text = "No active workbook.";
+                _lblToolsStatus.ForeColor = Color.Gray;
+                return;
+            }
+
+            int convertedCount = 0;
+
+            foreach (dynamic sheet in workbook.Worksheets)
+            {
+                try
+                {
+                    dynamic usedRange = sheet.UsedRange;
+                    if (usedRange == null) continue;
+
+                    foreach (dynamic cell in usedRange)
+                    {
+                        try
+                        {
+                            if (cell.HasFormula)
+                            {
+                                string formula = cell.Formula?.ToString() ?? "";
+                                if (formula.IndexOf("USEAI", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    cell.Value2 = cell.Value2;
+                                    convertedCount++;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch { }
+            }
+
+            _lblToolsStatus.Text = $"Converted {convertedCount} USEAI cell{(convertedCount == 1 ? "" : "s")} to values.";
+            _lblToolsStatus.ForeColor = Color.Green;
+        }
+        catch (Exception ex)
+        {
+            _lblToolsStatus.Text = $"Error: {ex.Message}";
+            _lblToolsStatus.ForeColor = Color.Red;
+        }
     }
 
     // ── Data helpers ────────────────────────────────────────────────

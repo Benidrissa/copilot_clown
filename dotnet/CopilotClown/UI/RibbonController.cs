@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using ExcelDna.Integration;
@@ -23,6 +24,13 @@ public class RibbonController : ExcelRibbon
                   onAction='OnSettingsClick'
                   screentip='Configure AI Settings'
                   supertip='Set API keys, choose AI model, and manage response cache for the =USEAI() function.' />
+          <button id='btnConvertValues'
+                  label='Convert to Values'
+                  size='large'
+                  imageMso='PasteValues'
+                  onAction='OnConvertValuesClick'
+                  screentip='Convert Selection to Values'
+                  supertip='Replace formulas in selected cells with their computed text values, so the workbook can be shared.' />
         </group>
       </tab>
     </tabs>
@@ -34,6 +42,24 @@ public class RibbonController : ExcelRibbon
     {
         var form = new SettingsForm();
         form.ShowDialog();
+    }
+
+    public void OnConvertValuesClick(IRibbonControl control)
+    {
+        try
+        {
+            dynamic app = ExcelDnaUtil.Application;
+            dynamic selection = app.Selection;
+            selection.Value2 = selection.Value2;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Could not convert: {ex.Message}",
+                "Convert to Values",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
     }
 }
 

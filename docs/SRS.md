@@ -136,7 +136,7 @@ Produces prompt: `"Classify [values from B1:B10] into one of the following categ
 
 #### 3.1.5 Behavior
 
-- The function is **asynchronous** via `ExcelAsyncUtil.Run()` — Excel shows `#BUSY!` while waiting
+- The function is **asynchronous** via `ExcelAsyncUtil.Observe()` with `IExcelObservable` — the cell shows `"Loading..."` while the API call is in progress, then updates to the final result
 - Results are **non-deterministic** — recalculating may produce different output
 - The function checks the in-memory cache before making an API call
 - If no API key is configured, returns a descriptive error string
@@ -233,6 +233,11 @@ The settings dialog is a WinForms form with tabbed sections:
 - "Clear Cache" button (trims MemoryCache)
 - TTL configuration input (default: 24 hours)
 - Toggle to enable/disable caching globally
+
+#### 3.4.4 Tools Tab
+- "Convert Selected Cells" button — replaces formulas in current selection with their computed values
+- "Convert All USEAI Cells" button — finds and converts all USEAI formulas in the workbook
+- Status label showing conversion result count
 
 ### 3.5 File and Folder Content Attachment
 
@@ -366,6 +371,26 @@ Anthropic's prompt caching is enabled on all attachment content blocks via `"cac
 - When limit is exceeded, `=USEAI()` returns error: `"Rate limit exceeded. Wait and try again."`
 - Rate limit counter resets independently of Excel recalculation
 
+### 3.8 Convert to Values
+
+#### 3.8.1 Overview
+
+Users can convert `=USEAI()` and `=USEAI.SINGLE()` formula cells to plain text values, enabling workbook sharing with users who do not have the add-in installed.
+
+#### 3.8.2 Convert Selected Cells
+
+- Accessible via ribbon button "Convert to Values" on the Home tab, or via the Tools tab in Settings
+- Replaces formulas in the current Excel selection with their computed values
+- Operates on all formulas in the selection, not limited to USEAI
+
+#### 3.8.3 Convert All USEAI Cells
+
+- Accessible via the Tools tab in the Settings dialog
+- Iterates all worksheets in the active workbook
+- Finds cells containing USEAI formulas (case-insensitive match on formula text)
+- Replaces each formula with its current computed value
+- Reports the count of converted cells
+
 ---
 
 ## 4. Non-Functional Requirements
@@ -456,7 +481,7 @@ Anthropic's prompt caching is enabled on all attachment content blocks via `"cac
 4. **FileResolver** detects `{...}` references in the prompt, extracts file/URL content (checking **ContentCache** first), and returns a `ResolvedPrompt` with clean text + attachments
 5. **CacheService** computes SHA-256 hash of `{ provider, model, prompt + attachment metadata }` and checks `MemoryCache`
 6. **Cache hit:** Return cached response immediately (already markdown-stripped)
-7. **Cache miss:** `ExcelAsyncUtil.Run()` dispatches async work → **RateLimiter** checks call budget → **FileUploadCache** checks if attachments need uploading (uploads via Files API if not cached) → **ILlmProvider** sends HTTP request (using `file_id` references or inline content)
+7. **Cache miss:** `ExcelAsyncUtil.Observe()` dispatches async work (cell shows `"Loading..."`) → **RateLimiter** checks call budget → **FileUploadCache** checks if attachments need uploading (uploads via Files API if not cached) → **ILlmProvider** sends HTTP request (using `file_id` references or inline content)
 8. Response is markdown-stripped, cached, and formatted for Excel (single value or 2D array)
 9. If `USEAI`: multi-line responses spill as rows; tabular (pipe-delimited) responses spill as 2D arrays with numeric parsing. If `USEAI.SINGLE`: full text returned in one cell with embedded line breaks.
 
@@ -464,9 +489,9 @@ Anthropic's prompt caching is enabled on all attachment content blocks via `"cac
 
 The add-in uses **Excel-DNA** (.NET Framework 4.8):
 - Functions are marked with `[ExcelFunction]` attributes and compiled into a `.xll` file
-- `ExcelAsyncUtil.Run()` enables non-blocking API calls — Excel shows `#BUSY!` during execution
+- `ExcelAsyncUtil.Observe()` with `IExcelObservable` enables non-blocking API calls — cells show `"Loading..."` during execution, then update to the final result
 - The ".xll" packages all dependencies into a single file (`ExcelDnaPackCompressResources`)
-- The ribbon is extended with an "AI Settings" button via `ExcelRibbon` / `CustomUI`
+- The ribbon is extended with "AI Settings" and "Convert to Values" buttons via `ExcelRibbon` / `CustomUI`
 - A fallback `[ExcelCommand]` macro (Alt+F8 > `ShowAISettings`) is registered in case the ribbon doesn't load
 - Settings and API keys persist to `%APPDATA%\CopilotClown\` on disk
 - JSON serialization uses `JavaScriptSerializer` (built into .NET 4.8, zero NuGet dependencies)

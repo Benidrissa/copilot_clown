@@ -117,51 +117,55 @@ public static class UseAiFunction
                 return FormatResponse(cached, singleCell);
         }
 
-        // Use ExcelAsyncUtil for async API call
+        // Use ExcelAsyncUtil.Observe for async API call with "Loading..." indicator
         var asyncKey = $"{provider}|{model}|{cachePromptKey}|{(singleCell ? "S" : "M")}";
-        return ExcelAsyncUtil.Run(singleCell ? "USEAI.SINGLE" : "USEAI", asyncKey, () =>
-        {
-            // Rate limit
-            RateLimiter.UpdateLimits(settings.RateLimitMax, settings.RateLimitWindowMinutes);
-            if (!RateLimiter.TryAcquire())
-                return (object)"Error: Rate limit exceeded. Wait and try again.";
-
-            try
+        return ExcelAsyncUtil.Observe(
+            singleCell ? "USEAI.SINGLE" : "USEAI",
+            asyncKey,
+            () => new LoadingObservable(() =>
             {
-                var llm = ProviderFactory.Get(provider);
+                // Rate limit
+                RateLimiter.UpdateLimits(settings.RateLimitMax, settings.RateLimitWindowMinutes);
+                if (!RateLimiter.TryAcquire())
+                    return (object)"Error: Rate limit exceeded. Wait and try again.";
 
-                // Upload attachments to API if not already uploaded (Layer 2 cache)
-                if (resolved.HasAttachments)
-                    UploadAttachments(llm, resolved, provider, apiKey);
+                try
+                {
+                    var llm = ProviderFactory.Get(provider);
 
-                var result = llm.CompleteAsync(resolved, apiKey, model, ct: CancellationToken.None)
-                    .GetAwaiter().GetResult();
+                    // Upload attachments to API if not already uploaded (Layer 2 cache)
+                    if (resolved.HasAttachments)
+                        UploadAttachments(llm, resolved, provider, apiKey);
 
-                // Strip markdown ONCE, then cache the clean version
-                var cleanText = StripMarkdown(result.Text.Trim());
+                    var result = llm.CompleteAsync(resolved, apiKey, model, ct: CancellationToken.None)
+                        .GetAwaiter().GetResult();
 
-                if (settings.CacheEnabled)
-                    Cache.Set(provider, model, cachePromptKey, cleanText, settings.CacheTtlMinutes);
+                    // Strip markdown ONCE, then cache the clean version
+                    var cleanText = StripMarkdown(result.Text.Trim());
 
-                return FormatResponse(cleanText, singleCell);
-            }
-            catch (ApiException ex)
-            {
-                return (object)$"Error: {ex.Message}";
-            }
-            catch (TaskCanceledException)
-            {
-                return (object)"Error: Request timed out. Try a simpler prompt or check your connection.";
-            }
-            catch (HttpRequestException)
-            {
-                return (object)"Error: Network error. Check your internet connection.";
-            }
-            catch (Exception ex)
-            {
-                return (object)$"Error: {ex.Message}";
-            }
-        });
+                    if (settings.CacheEnabled)
+                        Cache.Set(provider, model, cachePromptKey, cleanText, settings.CacheTtlMinutes);
+
+                    return FormatResponse(cleanText, singleCell);
+                }
+                catch (ApiException ex)
+                {
+                    return (object)$"Error: {ex.Message}";
+                }
+                catch (TaskCanceledException)
+                {
+                    return (object)"Error: Request timed out. Try a simpler prompt or check your connection.";
+                }
+                catch (HttpRequestException)
+                {
+                    return (object)"Error: Network error. Check your internet connection.";
+                }
+                catch (Exception ex)
+                {
+                    return (object)$"Error: {ex.Message}";
+                }
+            })
+        );
     }
 
     private static string BuildCachePromptKey(ResolvedPrompt resolved)
@@ -441,5 +445,53 @@ public static class UseAiFunction
         for (int i = 0; i < splitLines.Length; i++)
             spill[i, 0] = FitCell(splitLines[i].Trim());
         return spill;
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    //  IExcelObservable that shows "Loading..." then the real result
+    // ───────────────────────────────────────────────────────────────
+
+    private class LoadingObservable : IExcelObservable
+    {
+        private readonly Func<object> _compute;
+
+        public LoadingObservable(Func<object> compute)
+        {
+            _compute = compute;
+        }
+
+        public IDisposable Subscribe(IExcelObserver observer)
+        {
+            observer.OnNext("Loading...");
+
+            Task.Run(() =>
+            {
+                try
+                {
+                    var result = _compute();
+                    observer.OnNext(result);
+                    observer.OnCompleted();
+                }
+                catch (Exception ex)
+                {
+                    observer.OnError(ex);
+                }
+            });
+
+            return new ActionDisposable(() => { });
+        }
+    }
+
+    private class ActionDisposable : IDisposable
+    {
+        private Action _action;
+
+        public ActionDisposable(Action action) { _action = action; }
+
+        public void Dispose()
+        {
+            var action = Interlocked.Exchange(ref _action, null);
+            action?.Invoke();
+        }
     }
 }
