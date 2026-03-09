@@ -78,6 +78,7 @@ public class SettingsForm : Form
         tabs.TabPages.Add(CreateCacheTab());
         tabs.TabPages.Add(CreateRateLimitsTab());
         tabs.TabPages.Add(CreateToolsTab());
+        tabs.TabPages.Add(CreateAboutTab());
 
         Controls.Add(tabs);
     }
@@ -464,6 +465,80 @@ public class SettingsForm : Form
             _lblToolsStatus.Text = $"Error: {ex.Message}";
             _lblToolsStatus.ForeColor = Color.Red;
         }
+    }
+
+    // ── About Tab ───────────────────────────────────────────────────
+
+    private TabPage CreateAboutTab()
+    {
+        var page = new TabPage("About") { Padding = new Padding(16) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
+
+        // App title
+        layout.Controls.Add(new Label
+        {
+            Text = "Copilot Clown — Excel AI Add-in",
+            AutoSize = true,
+            Font = new Font(Font.FontFamily, 12, FontStyle.Bold),
+            Padding = new Padding(0, 0, 0, 8)
+        });
+
+        // Version
+        var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
+        layout.Controls.Add(new Label
+        {
+            Text = $"Version {version?.ToString(3) ?? "1.0.0"}",
+            AutoSize = true,
+            ForeColor = Color.Gray,
+            Padding = new Padding(0, 0, 0, 12)
+        });
+
+        // Developer info
+        var infoLabel = new Label
+        {
+            Text = "Developed by\n\n"
+                 + "Ben Idrissa TRAORE, PMP, CISA\n\n"
+                 + "Computer System Analyst | Certified Data Analyst\n"
+                 + "Specializing in Excel, Power BI, and Business Intelligence\n"
+                 + "solutions for health, government, and development\n"
+                 + "organizations across West Africa.",
+            AutoSize = true,
+            Font = new Font(Font.FontFamily, 9),
+            Padding = new Padding(0, 0, 0, 12)
+        };
+        layout.Controls.Add(infoLabel);
+
+        // Contact
+        var contactPanel = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, RowCount = 3 };
+        contactPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        contactPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        contactPanel.Controls.Add(new Label { Text = "Email:", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, 0, 0);
+        var emailLink = new LinkLabel { Text = "traore.benidrissa@gmail.com", AutoSize = true };
+        emailLink.LinkClicked += (s, e) =>
+        {
+            try { System.Diagnostics.Process.Start("mailto:traore.benidrissa@gmail.com"); } catch { }
+        };
+        contactPanel.Controls.Add(emailLink, 1, 0);
+
+        contactPanel.Controls.Add(new Label { Text = "Phone:", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, 0, 1);
+        contactPanel.Controls.Add(new Label { Text = "+234 816 026 5792", AutoSize = true }, 1, 1);
+
+        contactPanel.Controls.Add(new Label { Text = "Phone:", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, 0, 2);
+        contactPanel.Controls.Add(new Label { Text = "+226 76 48 64 06", AutoSize = true }, 1, 2);
+
+        layout.Controls.Add(contactPanel);
+
+        // GitHub link
+        var ghLink = new LinkLabel { Text = "GitHub: Benidrissa/copilot_clown", AutoSize = true, Padding = new Padding(0, 8, 0, 0) };
+        ghLink.LinkClicked += (s, e) =>
+        {
+            try { System.Diagnostics.Process.Start("https://github.com/Benidrissa/copilot_clown"); } catch { }
+        };
+        layout.Controls.Add(ghLink);
+
+        page.Controls.Add(layout);
+        return page;
     }
 
     // ── Data helpers ────────────────────────────────────────────────
