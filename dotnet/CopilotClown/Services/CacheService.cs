@@ -3,7 +3,6 @@ using System.Runtime.Caching;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
-using CopilotClown.Models;
 
 namespace CopilotClown.Services;
 
@@ -14,9 +13,9 @@ public class CacheService
     private long _hits;
     private long _misses;
 
-    public string Get(ProviderName provider, string model, string prompt)
+    public string Get(string prompt)
     {
-        var key = BuildKey(provider, model, prompt);
+        var key = BuildKey(prompt);
         var result = Cache.Get(key) as string;
         if (result != null)
             Interlocked.Increment(ref _hits);
@@ -25,9 +24,9 @@ public class CacheService
         return result;
     }
 
-    public void Set(ProviderName provider, string model, string prompt, string response, int ttlMinutes)
+    public void Set(string prompt, string response, int ttlMinutes)
     {
-        var key = BuildKey(provider, model, prompt);
+        var key = BuildKey(prompt);
         var policy = new CacheItemPolicy
         {
             AbsoluteExpiration = DateTimeOffset.UtcNow.AddMinutes(ttlMinutes)
@@ -52,14 +51,14 @@ public class CacheService
         return (entries, hits, misses, hitRate);
     }
 
-    private static string BuildKey(ProviderName provider, string model, string prompt)
+    private static string BuildKey(string prompt)
     {
         // For long prompts, fingerprint instead of hashing the entire string
         var fingerprint = prompt.Length <= 2048
             ? prompt
             : string.Concat(prompt.Length.ToString(), prompt.Substring(0, 512), prompt.Substring(prompt.Length - 512));
 
-        var data = Encoding.UTF8.GetBytes(string.Concat(provider.ToString(), "|", model, "|", fingerprint));
+        var data = Encoding.UTF8.GetBytes(fingerprint);
         byte[] hash;
         lock (Sha) { hash = Sha.ComputeHash(data); }
         return "aillm_" + BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
