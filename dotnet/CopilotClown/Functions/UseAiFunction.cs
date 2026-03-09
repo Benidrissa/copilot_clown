@@ -43,12 +43,27 @@ public static class UseAiFunction
     // ───────────────────────────────────────────────────────────────
     [ExcelFunction(
         Name = "USEAI",
-        Description = "Calls an AI model and spills the response into rows. Pass any mix of prompt text, cell references, and ranges. Use USEAI.SINGLE to keep everything in one cell.",
+        Description = "Calls an AI model and spills the response into rows. Pass prompt text, cell references, and ranges in any order. Use USEAI.SINGLE to keep everything in one cell.",
         HelpTopic = "https://github.com/Benidrissa/copilot_clown")]
     public static object UseAi(
-        [ExcelArgument(Name = "prompt_or_context", Description = "Prompt text, cell reference, or range. Pass as many arguments as needed in any order.")] params object[] args)
+        [ExcelArgument(Name = "prompt1", Description = "Text, cell, or range")] object a1,
+        [ExcelArgument(Name = "arg2", Description = "[Optional] Text, cell, or range")] object a2,
+        [ExcelArgument(Name = "arg3", Description = "[Optional] Text, cell, or range")] object a3,
+        [ExcelArgument(Name = "arg4", Description = "[Optional] Text, cell, or range")] object a4,
+        [ExcelArgument(Name = "arg5", Description = "[Optional] Text, cell, or range")] object a5,
+        [ExcelArgument(Name = "arg6", Description = "[Optional] Text, cell, or range")] object a6,
+        [ExcelArgument(Name = "arg7", Description = "[Optional] Text, cell, or range")] object a7,
+        [ExcelArgument(Name = "arg8", Description = "[Optional] Text, cell, or range")] object a8,
+        [ExcelArgument(Name = "arg9", Description = "[Optional] Text, cell, or range")] object a9,
+        [ExcelArgument(Name = "arg10", Description = "[Optional] Text, cell, or range")] object a10,
+        [ExcelArgument(Name = "arg11", Description = "[Optional] Text, cell, or range")] object a11,
+        [ExcelArgument(Name = "arg12", Description = "[Optional] Text, cell, or range")] object a12,
+        [ExcelArgument(Name = "arg13", Description = "[Optional] Text, cell, or range")] object a13,
+        [ExcelArgument(Name = "arg14", Description = "[Optional] Text, cell, or range")] object a14,
+        [ExcelArgument(Name = "arg15", Description = "[Optional] Text, cell, or range")] object a15,
+        [ExcelArgument(Name = "arg16", Description = "[Optional] Text, cell, or range")] object a16)
     {
-        return CallLlm(args, singleCell: false);
+        return CallLlm(new[] { a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16 }, singleCell: false);
     }
 
     // ───────────────────────────────────────────────────────────────
@@ -56,12 +71,27 @@ public static class UseAiFunction
     // ───────────────────────────────────────────────────────────────
     [ExcelFunction(
         Name = "USEAI.SINGLE",
-        Description = "Calls an AI model and returns the full response in a single cell. Pass any mix of prompt text, cell references, and ranges. Enable Wrap Text to see all lines.",
+        Description = "Calls an AI model and returns the full response in a single cell. Pass prompt text, cell references, and ranges in any order. Enable Wrap Text to see all lines.",
         HelpTopic = "https://github.com/Benidrissa/copilot_clown")]
     public static object UseAiSingle(
-        [ExcelArgument(Name = "prompt_or_context", Description = "Prompt text, cell reference, or range. Pass as many arguments as needed in any order.")] params object[] args)
+        [ExcelArgument(Name = "prompt1", Description = "Text, cell, or range")] object a1,
+        [ExcelArgument(Name = "arg2", Description = "[Optional] Text, cell, or range")] object a2,
+        [ExcelArgument(Name = "arg3", Description = "[Optional] Text, cell, or range")] object a3,
+        [ExcelArgument(Name = "arg4", Description = "[Optional] Text, cell, or range")] object a4,
+        [ExcelArgument(Name = "arg5", Description = "[Optional] Text, cell, or range")] object a5,
+        [ExcelArgument(Name = "arg6", Description = "[Optional] Text, cell, or range")] object a6,
+        [ExcelArgument(Name = "arg7", Description = "[Optional] Text, cell, or range")] object a7,
+        [ExcelArgument(Name = "arg8", Description = "[Optional] Text, cell, or range")] object a8,
+        [ExcelArgument(Name = "arg9", Description = "[Optional] Text, cell, or range")] object a9,
+        [ExcelArgument(Name = "arg10", Description = "[Optional] Text, cell, or range")] object a10,
+        [ExcelArgument(Name = "arg11", Description = "[Optional] Text, cell, or range")] object a11,
+        [ExcelArgument(Name = "arg12", Description = "[Optional] Text, cell, or range")] object a12,
+        [ExcelArgument(Name = "arg13", Description = "[Optional] Text, cell, or range")] object a13,
+        [ExcelArgument(Name = "arg14", Description = "[Optional] Text, cell, or range")] object a14,
+        [ExcelArgument(Name = "arg15", Description = "[Optional] Text, cell, or range")] object a15,
+        [ExcelArgument(Name = "arg16", Description = "[Optional] Text, cell, or range")] object a16)
     {
-        return CallLlm(args, singleCell: true);
+        return CallLlm(new[] { a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16 }, singleCell: true);
     }
 
     // ───────────────────────────────────────────────────────────────
