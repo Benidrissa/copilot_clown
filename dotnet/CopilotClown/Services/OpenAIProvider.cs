@@ -60,11 +60,18 @@ public class OpenAIProvider : ILlmProvider
 
         requestBody[maxTokensKey] = maxTokens;
 
-        // Reasoning models (o1, o3, etc.) don't support temperature/top_p
+        // Reasoning models (o1, o3, o4) don't support temperature, top_p, or system messages
         if (!IsReasoningModel(model))
         {
             requestBody["temperature"] = settings.Temperature;
             requestBody["top_p"] = settings.TopP;
+        }
+        else
+        {
+            // Remove system message for reasoning models — they don't support it
+            if (messages.Count > 1 && messages[0].ContainsKey("role") && (string)messages[0]["role"] == "system")
+                messages.RemoveAt(0);
+            requestBody["messages"] = messages.ToArray();
         }
 
         var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")

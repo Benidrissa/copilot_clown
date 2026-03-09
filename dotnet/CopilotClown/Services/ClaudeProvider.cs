@@ -50,10 +50,15 @@ public class ClaudeProvider : ILlmProvider
         {
             { "model", model },
             { "max_tokens", maxTokens },
-            { "messages", new[] { new Dictionary<string, object> { { "role", "user" }, { "content", content } } } },
-            { "temperature", settings.Temperature },
-            { "top_p", settings.TopP }
+            { "messages", new[] { new Dictionary<string, object> { { "role", "user" }, { "content", content } } } }
         };
+
+        // Anthropic: temperature and top_p are mutually exclusive — send only one.
+        // Prefer temperature unless user left it at default and changed top_p.
+        if (Math.Abs(settings.TopP - 1.0) > 0.001 && Math.Abs(settings.Temperature - 1.0) < 0.001)
+            requestBody["top_p"] = settings.TopP;
+        else
+            requestBody["temperature"] = settings.Temperature;
 
         if (!string.IsNullOrWhiteSpace(settings.SystemPrompt))
             requestBody["system"] = settings.SystemPrompt;
