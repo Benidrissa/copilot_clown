@@ -14,6 +14,7 @@ namespace CopilotClown.Functions;
 public static class UseAiFunction
 {
     private static readonly CacheService Cache = new CacheService();
+    private static readonly DiskCache Disk = new DiskCache();
     private static readonly SettingsService Settings = new SettingsService();
     private static readonly ConcurrentDictionary<ProviderName, RateLimiter> RateLimiters = new ConcurrentDictionary<ProviderName, RateLimiter>();
     private static readonly ContentCache FileCache = new ContentCache();
@@ -35,25 +36,19 @@ public static class UseAiFunction
     internal static ConcurrentDictionary<ProviderName, RateLimiter> AllRateLimiters => RateLimiters;
     internal static ContentCache FileCacheInstance => FileCache;
     internal static FileUploadCache UploadCacheInstance => UploadCache;
+    internal static DiskCache DiskCacheInstance => Disk;
 
     // ───────────────────────────────────────────────────────────────
     //  USEAI  —  spills multi-line responses into separate rows
     // ───────────────────────────────────────────────────────────────
     [ExcelFunction(
         Name = "USEAI",
-        Description = "Calls an AI model and spills the response into separate rows. Use USEAISINGLE to keep everything in one cell.",
+        Description = "Calls an AI model and spills the response into rows. Pass any mix of prompt text, cell references, and ranges. Use USEAI.SINGLE to keep everything in one cell.",
         HelpTopic = "https://github.com/Benidrissa/copilot_clown")]
     public static object UseAi(
-        [ExcelArgument(Name = "prompt_part1", Description = "Text describing the task or question")] object arg1,
-        [ExcelArgument(Name = "context1", Description = "[Optional] Cell reference or range providing context")] object arg2,
-        [ExcelArgument(Name = "prompt_part2", Description = "[Optional] Additional prompt text")] object arg3,
-        [ExcelArgument(Name = "context2", Description = "[Optional] Additional context")] object arg4,
-        [ExcelArgument(Name = "prompt_part3", Description = "[Optional] Additional prompt text")] object arg5,
-        [ExcelArgument(Name = "context3", Description = "[Optional] Additional context")] object arg6,
-        [ExcelArgument(Name = "prompt_part4", Description = "[Optional] Additional prompt text")] object arg7,
-        [ExcelArgument(Name = "context4", Description = "[Optional] Additional context")] object arg8)
+        [ExcelArgument(Name = "prompt_or_context", Description = "Prompt text, cell reference, or range. Pass as many arguments as needed in any order.")] params object[] args)
     {
-        return CallLlm(new[] { arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8 }, singleCell: false);
+        return CallLlm(args, singleCell: false);
     }
 
     // ───────────────────────────────────────────────────────────────
@@ -61,19 +56,12 @@ public static class UseAiFunction
     // ───────────────────────────────────────────────────────────────
     [ExcelFunction(
         Name = "USEAI.SINGLE",
-        Description = "Calls an AI model and returns the full response in a single cell (enable Wrap Text to see all lines).",
+        Description = "Calls an AI model and returns the full response in a single cell. Pass any mix of prompt text, cell references, and ranges. Enable Wrap Text to see all lines.",
         HelpTopic = "https://github.com/Benidrissa/copilot_clown")]
     public static object UseAiSingle(
-        [ExcelArgument(Name = "prompt_part1", Description = "Text describing the task or question")] object arg1,
-        [ExcelArgument(Name = "context1", Description = "[Optional] Cell reference or range providing context")] object arg2,
-        [ExcelArgument(Name = "prompt_part2", Description = "[Optional] Additional prompt text")] object arg3,
-        [ExcelArgument(Name = "context2", Description = "[Optional] Additional context")] object arg4,
-        [ExcelArgument(Name = "prompt_part3", Description = "[Optional] Additional prompt text")] object arg5,
-        [ExcelArgument(Name = "context3", Description = "[Optional] Additional context")] object arg6,
-        [ExcelArgument(Name = "prompt_part4", Description = "[Optional] Additional prompt text")] object arg7,
-        [ExcelArgument(Name = "context4", Description = "[Optional] Additional context")] object arg8)
+        [ExcelArgument(Name = "prompt_or_context", Description = "Prompt text, cell reference, or range. Pass as many arguments as needed in any order.")] params object[] args)
     {
-        return CallLlm(new[] { arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8 }, singleCell: true);
+        return CallLlm(args, singleCell: true);
     }
 
     // ───────────────────────────────────────────────────────────────
@@ -112,12 +100,27 @@ public static class UseAiFunction
         // Build cache key that includes attachment identity
         var cachePromptKey = BuildCachePromptKey(resolved);
 
-        // Check cache (cached values are already markdown-stripped)
+        // Check cache hierarchy: memory → workbook XML → disk
         if (settings.CacheEnabled)
         {
             var cached = Cache.Get(cachePromptKey);
             if (cached != null)
                 return FormatResponse(cached, singleCell);
+
+            cached = WorkbookCache.Get(cachePromptKey);
+            if (cached != null)
+            {
+                Cache.Set(cachePromptKey, cached, settings.CacheTtlMinutes);
+                return FormatResponse(cached, singleCell);
+            }
+
+            cached = Disk.Get(cachePromptKey, settings.CacheTtlMinutes);
+            if (cached != null)
+            {
+                Cache.Set(cachePromptKey, cached, settings.CacheTtlMinutes);
+                WorkbookCache.Set(cachePromptKey, cached);
+                return FormatResponse(cached, singleCell);
+            }
         }
 
         // Use ExcelAsyncUtil.Observe for async API call with "Loading..." indicator
@@ -132,9 +135,14 @@ public static class UseAiFunction
                 // a new subscription even though the result is already cached.
                 if (settings.CacheEnabled)
                 {
-                    var cached = Cache.Get(cachePromptKey);
+                    var cached = Cache.Get(cachePromptKey)
+                        ?? WorkbookCache.Get(cachePromptKey)
+                        ?? Disk.Get(cachePromptKey, settings.CacheTtlMinutes);
                     if (cached != null)
+                    {
+                        Cache.Set(cachePromptKey, cached, settings.CacheTtlMinutes);
                         return FormatResponse(cached, singleCell);
+                    }
                 }
 
                 // Rate limit (per provider)
@@ -169,7 +177,11 @@ public static class UseAiFunction
                     var cleanText = StripMarkdown(result.Text.Trim());
 
                     if (settings.CacheEnabled)
+                    {
                         Cache.Set(cachePromptKey, cleanText, settings.CacheTtlMinutes);
+                        WorkbookCache.Set(cachePromptKey, cleanText);
+                        Disk.Set(cachePromptKey, cleanText);
+                    }
 
                     return FormatResponse(cleanText, singleCell);
                 }
@@ -515,6 +527,72 @@ public static class UseAiFunction
                 return $"{bestMatch.DisplayName} (available)";
         }
         return null;
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    //  Refresh — invalidate cached results and force recalculation
+    // ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Invalidate cache across all layers (memory, workbook, disk) and
+    /// recalculate all USEAI/USEAI.SINGLE formulas in the active workbook.
+    /// Returns (refreshed count, skipped due to rate limit).
+    /// </summary>
+    internal static (int refreshed, int skipped) RefreshAll()
+    {
+        Cache.Clear();
+        WorkbookCache.Clear();
+        Disk.Clear();
+
+        try
+        {
+            dynamic app = ExcelDnaUtil.Application;
+            app.CalculateFull();
+        }
+        catch { }
+
+        return (0, 0); // Exact count not trackable with CalculateFull
+    }
+
+    /// <summary>
+    /// Invalidate cache for USEAI formulas in the current selection and recalculate.
+    /// Returns (refreshed count, skipped due to rate limit).
+    /// </summary>
+    internal static (int refreshed, int skipped) RefreshSelected()
+    {
+        try
+        {
+            dynamic app = ExcelDnaUtil.Application;
+            dynamic sel = app.Selection;
+            if (sel == null) return (0, 0);
+
+            int count = 0;
+            foreach (dynamic cell in sel.Cells)
+            {
+                try
+                {
+                    string formula = cell.Formula;
+                    if (formula != null &&
+                        (formula.IndexOf("USEAI", StringComparison.OrdinalIgnoreCase) >= 0))
+                    {
+                        count++;
+                    }
+                }
+                catch { }
+            }
+
+            if (count == 0) return (0, 0);
+
+            // Clear memory cache (disk/workbook entries for these keys can't be
+            // individually targeted without re-parsing formulas, so clear all)
+            Cache.Clear();
+
+            // Dirty only the selected cells to trigger recalculation
+            try { sel.Dirty(); } catch { }
+
+            return (count, 0);
+        }
+        catch { return (0, 0); }
     }
 
     // ───────────────────────────────────────────────────────────────
