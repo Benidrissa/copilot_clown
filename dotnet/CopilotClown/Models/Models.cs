@@ -53,9 +53,21 @@ public class AppSettings
     public int RateLimitWindowMinutes { get; set; } = 10;
     public int ApiTimeoutSeconds { get; set; } = 30;
     public string SystemPrompt { get; set; } = "";
+    public string ActivePromptName { get; set; } = "";
     public double Temperature { get; set; } = 1.0;
     public int MaxTokens { get; set; } = 8192;
     public double TopP { get; set; } = 1.0;
+}
+
+public class SystemPromptEntry
+{
+    public string Name { get; set; }
+    public string Text { get; set; }
+
+    public SystemPromptEntry() { }
+    public SystemPromptEntry(string name, string text) { Name = name; Text = text; }
+
+    public override string ToString() => Name ?? "(Untitled)";
 }
 
 public static class ModelRegistry

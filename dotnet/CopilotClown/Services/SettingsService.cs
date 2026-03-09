@@ -13,6 +13,7 @@ public class SettingsService
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CopilotClown");
     private static readonly string SettingsFile = Path.Combine(AppDataDir, "settings.json");
     private static readonly string KeyFile = Path.Combine(AppDataDir, "keys.dat");
+    private static readonly string PromptsFile = Path.Combine(AppDataDir, "prompts.json");
 
     // In-memory caches — avoid disk I/O on every cell calculation
     private AppSettings _cachedSettings;
@@ -97,6 +98,31 @@ public class SettingsService
     public bool HasApiKey(ProviderName provider)
     {
         return GetApiKey(provider) != null;
+    }
+
+    // ── Prompt Library ────────────────────────────────────────────
+
+    public List<SystemPromptEntry> LoadPrompts()
+    {
+        if (!File.Exists(PromptsFile))
+            return new List<SystemPromptEntry>();
+
+        try
+        {
+            var json = File.ReadAllText(PromptsFile);
+            return JsonHelper.Deserialize<List<SystemPromptEntry>>(json)
+                   ?? new List<SystemPromptEntry>();
+        }
+        catch
+        {
+            return new List<SystemPromptEntry>();
+        }
+    }
+
+    public void SavePrompts(List<SystemPromptEntry> prompts)
+    {
+        var json = JsonHelper.Serialize(prompts);
+        File.WriteAllText(PromptsFile, json);
     }
 
     // ── DPAPI helpers ───────────────────────────────────────────────
