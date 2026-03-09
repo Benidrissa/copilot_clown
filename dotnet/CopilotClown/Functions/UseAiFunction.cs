@@ -43,19 +43,12 @@ public static class UseAiFunction
     // ───────────────────────────────────────────────────────────────
     [ExcelFunction(
         Name = "USEAI",
-        Description = "Calls an AI model and spills the response into separate rows. Use USEAISINGLE to keep everything in one cell.",
+        Description = "Calls an AI model and spills the response into rows. Pass any mix of prompt text, cell references, and ranges. Use USEAI.SINGLE to keep everything in one cell.",
         HelpTopic = "https://github.com/Benidrissa/copilot_clown")]
     public static object UseAi(
-        [ExcelArgument(Name = "prompt_part1", Description = "Text describing the task or question")] object arg1,
-        [ExcelArgument(Name = "context1", Description = "[Optional] Cell reference or range providing context")] object arg2,
-        [ExcelArgument(Name = "prompt_part2", Description = "[Optional] Additional prompt text")] object arg3,
-        [ExcelArgument(Name = "context2", Description = "[Optional] Additional context")] object arg4,
-        [ExcelArgument(Name = "prompt_part3", Description = "[Optional] Additional prompt text")] object arg5,
-        [ExcelArgument(Name = "context3", Description = "[Optional] Additional context")] object arg6,
-        [ExcelArgument(Name = "prompt_part4", Description = "[Optional] Additional prompt text")] object arg7,
-        [ExcelArgument(Name = "context4", Description = "[Optional] Additional context")] object arg8)
+        [ExcelArgument(Name = "prompt_or_context", Description = "Prompt text, cell reference, or range. Pass as many arguments as needed in any order.")] params object[] args)
     {
-        return CallLlm(new[] { arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8 }, singleCell: false);
+        return CallLlm(args, singleCell: false);
     }
 
     // ───────────────────────────────────────────────────────────────
@@ -63,19 +56,12 @@ public static class UseAiFunction
     // ───────────────────────────────────────────────────────────────
     [ExcelFunction(
         Name = "USEAI.SINGLE",
-        Description = "Calls an AI model and returns the full response in a single cell (enable Wrap Text to see all lines).",
+        Description = "Calls an AI model and returns the full response in a single cell. Pass any mix of prompt text, cell references, and ranges. Enable Wrap Text to see all lines.",
         HelpTopic = "https://github.com/Benidrissa/copilot_clown")]
     public static object UseAiSingle(
-        [ExcelArgument(Name = "prompt_part1", Description = "Text describing the task or question")] object arg1,
-        [ExcelArgument(Name = "context1", Description = "[Optional] Cell reference or range providing context")] object arg2,
-        [ExcelArgument(Name = "prompt_part2", Description = "[Optional] Additional prompt text")] object arg3,
-        [ExcelArgument(Name = "context2", Description = "[Optional] Additional context")] object arg4,
-        [ExcelArgument(Name = "prompt_part3", Description = "[Optional] Additional prompt text")] object arg5,
-        [ExcelArgument(Name = "context3", Description = "[Optional] Additional context")] object arg6,
-        [ExcelArgument(Name = "prompt_part4", Description = "[Optional] Additional prompt text")] object arg7,
-        [ExcelArgument(Name = "context4", Description = "[Optional] Additional context")] object arg8)
+        [ExcelArgument(Name = "prompt_or_context", Description = "Prompt text, cell reference, or range. Pass as many arguments as needed in any order.")] params object[] args)
     {
-        return CallLlm(new[] { arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8 }, singleCell: true);
+        return CallLlm(args, singleCell: true);
     }
 
     // ───────────────────────────────────────────────────────────────
