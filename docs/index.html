@@ -92,6 +92,19 @@
     .provider .logo { font-size: 2.5rem; margin-bottom: 0.3rem; }
     .provider span { font-size: 0.95rem; color: var(--muted); font-weight: 500; }
 
+    /* Screenshots */
+    .screenshots { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
+    .screenshot {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      overflow: hidden; transition: box-shadow 0.2s;
+    }
+    .screenshot:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+    .screenshot img { width: 100%; display: block; }
+    .screenshot .caption {
+      padding: 0.75rem 1rem; text-align: center; font-size: 0.9rem;
+      font-weight: 600; color: var(--muted);
+    }
+
     /* Footer */
     footer {
       text-align: center; padding: 2rem 1.5rem; color: var(--muted); font-size: 0.85rem;
@@ -168,6 +181,25 @@
   <section class="section" style="text-align: center;">
     <h2>Built for Professionals Who Live in Excel</h2>
     <p style="color: var(--muted); max-width: 600px; margin: 0 auto;">Analysts, consultants, project managers, finance teams — anyone who needs AI assistance without leaving their spreadsheet.</p>
+  </section>
+
+  <!-- Screenshots -->
+  <section class="section">
+    <h2>See It in Action</h2>
+    <div class="screenshots">
+      <div class="screenshot">
+        <img src="images/api-keys.png" alt="API Keys settings tab">
+        <div class="caption">Configure API Keys</div>
+      </div>
+      <div class="screenshot">
+        <img src="images/parameters.png" alt="Parameters settings tab">
+        <div class="caption">Fine-Tune Parameters</div>
+      </div>
+      <div class="screenshot">
+        <img src="images/tools.png" alt="Tools settings tab">
+        <div class="caption">Share Workbooks Easily</div>
+      </div>
+    </div>
   </section>
 
   <!-- How it works -->
