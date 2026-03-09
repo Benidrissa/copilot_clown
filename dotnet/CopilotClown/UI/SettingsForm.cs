@@ -208,6 +208,20 @@ public class SettingsForm : Form
         var btnPanel = new FlowLayoutPanel { AutoSize = true };
         var btnClear = new Button { Text = "Clear API Cache", Width = 120, ForeColor = Color.DarkRed };
         btnClear.Click += (s, e) => { _cache.Clear(); RefreshCacheStats(); };
+        var btnClearWb = new Button { Text = "Clear Workbook Cache", Width = 140, ForeColor = Color.DarkRed };
+        btnClearWb.Click += (s, e) =>
+        {
+            WorkbookCache.Clear();
+            RefreshCacheStats();
+            MessageBox.Show("Workbook embedded cache cleared.", "Cleared", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        };
+        var btnClearDisk = new Button { Text = "Clear Disk Cache", Width = 120, ForeColor = Color.DarkRed };
+        btnClearDisk.Click += (s, e) =>
+        {
+            UseAiFunction.DiskCacheInstance.Clear();
+            RefreshCacheStats();
+            MessageBox.Show("Disk cache cleared.", "Cleared", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        };
         var btnClearFiles = new Button { Text = "Clear File Cache", Width = 120, ForeColor = Color.DarkRed };
         btnClearFiles.Click += (s, e) =>
         {
@@ -218,7 +232,7 @@ public class SettingsForm : Form
         };
         var btnSaveCache = new Button { Text = "Save Settings", Width = 120 };
         btnSaveCache.Click += (s, e) => SaveCacheSettings();
-        btnPanel.Controls.AddRange(new Control[] { btnClear, btnClearFiles, btnSaveCache });
+        btnPanel.Controls.AddRange(new Control[] { btnClear, btnClearWb, btnClearDisk, btnClearFiles, btnSaveCache });
         layout.Controls.Add(btnPanel);
 
         page.Controls.Add(layout);
@@ -620,7 +634,12 @@ public class SettingsForm : Form
     private void RefreshCacheStats()
     {
         var (entries, hits, misses, hitRate) = _cache.GetStats();
-        _lblCacheStats.Text = $"Entries: {entries}\nHits: {hits}  |  Misses: {misses}\nHit Rate: {hitRate:P0}";
+        var wbCount = WorkbookCache.Count;
+        var diskCount = UseAiFunction.DiskCacheInstance.Count;
+        _lblCacheStats.Text =
+            $"Memory Cache:   {entries} entries  |  Hits: {hits}  Misses: {misses}  ({hitRate:P0})\n" +
+            $"Workbook Cache: {wbCount} entries  (embedded in .xlsx, travels with file)\n" +
+            $"Disk Cache:     {diskCount} entries  (survives Excel restarts)";
     }
 
     private void SaveApiKey(ProviderName provider, string key)

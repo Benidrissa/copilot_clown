@@ -14,6 +14,7 @@ namespace CopilotClown.Functions;
 public static class UseAiFunction
 {
     private static readonly CacheService Cache = new CacheService();
+    private static readonly DiskCache Disk = new DiskCache();
     private static readonly SettingsService Settings = new SettingsService();
     private static readonly ConcurrentDictionary<ProviderName, RateLimiter> RateLimiters = new ConcurrentDictionary<ProviderName, RateLimiter>();
     private static readonly ContentCache FileCache = new ContentCache();
@@ -35,6 +36,7 @@ public static class UseAiFunction
     internal static ConcurrentDictionary<ProviderName, RateLimiter> AllRateLimiters => RateLimiters;
     internal static ContentCache FileCacheInstance => FileCache;
     internal static FileUploadCache UploadCacheInstance => UploadCache;
+    internal static DiskCache DiskCacheInstance => Disk;
 
     // ───────────────────────────────────────────────────────────────
     //  USEAI  —  spills multi-line responses into separate rows
@@ -112,12 +114,27 @@ public static class UseAiFunction
         // Build cache key that includes attachment identity
         var cachePromptKey = BuildCachePromptKey(resolved);
 
-        // Check cache (cached values are already markdown-stripped)
+        // Check cache hierarchy: memory → workbook XML → disk
         if (settings.CacheEnabled)
         {
             var cached = Cache.Get(cachePromptKey);
             if (cached != null)
                 return FormatResponse(cached, singleCell);
+
+            cached = WorkbookCache.Get(cachePromptKey);
+            if (cached != null)
+            {
+                Cache.Set(cachePromptKey, cached, settings.CacheTtlMinutes);
+                return FormatResponse(cached, singleCell);
+            }
+
+            cached = Disk.Get(cachePromptKey, settings.CacheTtlMinutes);
+            if (cached != null)
+            {
+                Cache.Set(cachePromptKey, cached, settings.CacheTtlMinutes);
+                WorkbookCache.Set(cachePromptKey, cached);
+                return FormatResponse(cached, singleCell);
+            }
         }
 
         // Use ExcelAsyncUtil.Observe for async API call with "Loading..." indicator
@@ -132,9 +149,14 @@ public static class UseAiFunction
                 // a new subscription even though the result is already cached.
                 if (settings.CacheEnabled)
                 {
-                    var cached = Cache.Get(cachePromptKey);
+                    var cached = Cache.Get(cachePromptKey)
+                        ?? WorkbookCache.Get(cachePromptKey)
+                        ?? Disk.Get(cachePromptKey, settings.CacheTtlMinutes);
                     if (cached != null)
+                    {
+                        Cache.Set(cachePromptKey, cached, settings.CacheTtlMinutes);
                         return FormatResponse(cached, singleCell);
+                    }
                 }
 
                 // Rate limit (per provider)
@@ -169,7 +191,11 @@ public static class UseAiFunction
                     var cleanText = StripMarkdown(result.Text.Trim());
 
                     if (settings.CacheEnabled)
+                    {
                         Cache.Set(cachePromptKey, cleanText, settings.CacheTtlMinutes);
+                        WorkbookCache.Set(cachePromptKey, cleanText);
+                        Disk.Set(cachePromptKey, cleanText);
+                    }
 
                     return FormatResponse(cleanText, singleCell);
                 }
@@ -515,6 +541,72 @@ public static class UseAiFunction
                 return $"{bestMatch.DisplayName} (available)";
         }
         return null;
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    //  Refresh — invalidate cached results and force recalculation
+    // ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Invalidate cache across all layers (memory, workbook, disk) and
+    /// recalculate all USEAI/USEAI.SINGLE formulas in the active workbook.
+    /// Returns (refreshed count, skipped due to rate limit).
+    /// </summary>
+    internal static (int refreshed, int skipped) RefreshAll()
+    {
+        Cache.Clear();
+        WorkbookCache.Clear();
+        Disk.Clear();
+
+        try
+        {
+            dynamic app = ExcelDnaUtil.Application;
+            app.CalculateFull();
+        }
+        catch { }
+
+        return (0, 0); // Exact count not trackable with CalculateFull
+    }
+
+    /// <summary>
+    /// Invalidate cache for USEAI formulas in the current selection and recalculate.
+    /// Returns (refreshed count, skipped due to rate limit).
+    /// </summary>
+    internal static (int refreshed, int skipped) RefreshSelected()
+    {
+        try
+        {
+            dynamic app = ExcelDnaUtil.Application;
+            dynamic sel = app.Selection;
+            if (sel == null) return (0, 0);
+
+            int count = 0;
+            foreach (dynamic cell in sel.Cells)
+            {
+                try
+                {
+                    string formula = cell.Formula;
+                    if (formula != null &&
+                        (formula.IndexOf("USEAI", StringComparison.OrdinalIgnoreCase) >= 0))
+                    {
+                        count++;
+                    }
+                }
+                catch { }
+            }
+
+            if (count == 0) return (0, 0);
+
+            // Clear memory cache (disk/workbook entries for these keys can't be
+            // individually targeted without re-parsing formulas, so clear all)
+            Cache.Clear();
+
+            // Dirty only the selected cells to trigger recalculation
+            try { sel.Dirty(); } catch { }
+
+            return (count, 0);
+        }
+        catch { return (0, 0); }
     }
 
     // ───────────────────────────────────────────────────────────────
