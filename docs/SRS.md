@@ -152,6 +152,7 @@ Produces prompt: `"Classify [values from B1:B10] into one of the following categ
 |----------|-------------|-------------|
 | **Anthropic Claude** | `https://api.anthropic.com/v1/messages` | `x-api-key` header |
 | **OpenAI** | `https://api.openai.com/v1/chat/completions` | `Authorization: Bearer` header |
+| **Google Gemini** | `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` | `x-goog-api-key` header |
 
 #### 3.2.2 Available Models
 
@@ -192,6 +193,15 @@ Produces prompt: `"Classify [values from B1:B10] into one of the following categ
 | `o1` | o1 |
 | `o1-pro` | o1 Pro |
 | `gpt-3.5-turbo` | GPT-3.5 Turbo |
+
+**Google Gemini Models:**
+
+| Model ID | Display Name |
+|----------|-------------|
+| `gemini-2.5-pro-preview-06-05` | Gemini 2.5 Pro |
+| `gemini-2.5-flash-preview-05-20` | Gemini 2.5 Flash |
+| `gemini-2.0-flash` | Gemini 2.0 Flash |
+| `gemini-2.0-flash-lite` | Gemini 2.0 Flash Lite |
 
 The model list is hardcoded but designed for easy extension via a registry pattern.
 
@@ -238,6 +248,33 @@ The settings dialog is a WinForms form with tabbed sections:
 - "Convert Selected Cells" button — replaces formulas in current selection with their computed values
 - "Convert All USEAI Cells" button — finds and converts all USEAI formulas in the workbook
 - Status label showing conversion result count
+
+#### 3.4.5 System Prompt Tab
+- Multi-line text box for entering a persistent system prompt (persona / global instructions)
+- Character counter (max 10,000 characters)
+- "Clear" button to remove the system prompt
+- Persisted in `settings.json` as `SystemPrompt`
+
+#### 3.4.6 Parameters Tab
+- **Temperature** slider: 0.0 – 2.0 (default: 1.0). Lower = more deterministic, higher = more creative
+- **Max Tokens** input: 1 – 32,768 (default: 8,192). Maximum response length in tokens
+- **Top P** input: 0.0 – 1.0 (default: 1.0). Nucleus sampling threshold
+- Persisted in `settings.json` as `Temperature`, `MaxTokens`, `TopP`
+- Tooltip help text explaining each parameter
+
+#### 3.4.7 Rate Limit Tracker Tab
+- **Per-provider status panel** showing for each configured provider:
+  - Provider name and active model
+  - Remaining calls in current window (e.g., "487 / 500 remaining")
+  - Time until window resets (e.g., "Resets in 6m 32s")
+  - Visual progress bar (green → yellow → red as calls are consumed)
+  - Status indicator: `Available`, `Near Limit` (< 10% remaining), `Rate Limited` (0 remaining)
+- **Model availability matrix** — table of all configured models with status:
+  - ✅ Available (calls remaining)
+  - ⚠️ Near Limit (< 10% remaining)
+  - ❌ Rate Limited (wait time displayed)
+- **Auto-refresh** — panel refreshes every 5 seconds while open
+- **Suggested model** — when the active model is rate-limited, highlights the best alternative model from the same provider (or the other provider) that is still available
 
 ### 3.5 File and Folder Content Attachment
 
@@ -367,8 +404,9 @@ Anthropic's prompt caching is enabled on all attachment content blocks via `"cac
 ### 3.7 Rate Limiting
 
 - Client-side rate limiter: configurable limit (default 500 calls per 10 minutes)
+- **Per-provider**: each provider (Anthropic, OpenAI) maintains its own independent rate limiter — hitting the limit on one provider does not block the other
 - Uses a sliding window counter stored in memory
-- When limit is exceeded, `=USEAI()` returns error: `"Rate limit exceeded. Wait and try again."`
+- When limit is exceeded, `=USEAI()` returns error: `"Error: <Provider> rate limit exceeded. Wait and try again."`
 - Rate limit counter resets independently of Excel recalculation
 
 ### 3.8 Convert to Values
@@ -390,6 +428,168 @@ Users can convert `=USEAI()` and `=USEAI.SINGLE()` formula cells to plain text v
 - Finds cells containing USEAI formulas (case-insensitive match on formula text)
 - Replaces each formula with its current computed value
 - Reports the count of converted cells
+
+### 3.9 System Prompt (Custom Instructions)
+
+#### 3.9.1 Overview
+
+Users can define a persistent system prompt that is sent with every API call. This provides a global persona or set of instructions (e.g., "You are a concise data analyst. Always respond in bullet points.") without repeating it in every `=USEAI()` formula.
+
+#### 3.9.2 Behavior
+
+- Sent as the `system` parameter (Anthropic) or a `{"role": "system"}` message (OpenAI / Gemini) before the user prompt
+- Maximum length: 10,000 characters
+- Optional — when blank, no system message is sent (current behavior)
+- Persisted in `settings.json` as `SystemPrompt` (default: empty string)
+- The system prompt is **not** included in the cache key — changing the system prompt invalidates nothing, which ensures fast iteration. Users should clear cache manually after changing the system prompt if they want fresh responses.
+
+#### 3.9.3 Provider Mapping
+
+| Provider | System Prompt Format |
+|----------|---------------------|
+| **Anthropic Claude** | Top-level `"system"` field in request body |
+| **OpenAI** | `{"role": "system", "content": "..."}` message at index 0 |
+| **Google Gemini** | `systemInstruction.parts[0].text` field |
+
+### 3.10 Temperature & Parameter Control
+
+#### 3.10.1 Overview
+
+Users can control LLM generation parameters from the Settings dialog to tune output behavior.
+
+#### 3.10.2 Parameters
+
+| Parameter | Default | Range | Description |
+|-----------|---------|-------|-------------|
+| `Temperature` | 1.0 | 0.0 – 2.0 | Controls randomness. 0 = deterministic, 2 = highly creative |
+| `MaxTokens` | 8192 | 1 – 32,768 | Maximum number of tokens in the response |
+| `TopP` | 1.0 | 0.0 – 1.0 | Nucleus sampling: only consider tokens with cumulative probability ≤ TopP |
+
+#### 3.10.3 Behavior
+
+- Parameters are sent with every API call to all providers
+- Persisted in `settings.json`
+- The `MaxTokens` parameter maps to `max_tokens` (Claude, older OpenAI) or `max_completion_tokens` (GPT-5.x)
+- **Not included in cache key** — changing parameters only affects future API calls
+- Some models may ignore `temperature` or `top_p` (e.g., OpenAI reasoning models o1/o3). The provider silently omits unsupported parameters.
+
+### 3.11 Google Gemini Provider
+
+#### 3.11.1 Overview
+
+Google Gemini is added as a third LLM provider. Gemini offers generous free-tier usage, making the add-in accessible to users without paid API plans.
+
+#### 3.11.2 API Details
+
+| Aspect | Detail |
+|--------|--------|
+| **API Endpoint** | `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` |
+| **Auth** | `x-goog-api-key` header or `?key=` query parameter |
+| **System Prompt** | `systemInstruction.parts[0].text` |
+| **Max Tokens** | `generationConfig.maxOutputTokens` |
+| **Temperature** | `generationConfig.temperature` |
+| **Top P** | `generationConfig.topP` |
+
+#### 3.11.3 Available Models
+
+| Model ID | Display Name | Context Window | Pricing Tier |
+|----------|-------------|----------------|-------------|
+| `gemini-2.5-pro-preview-06-05` | Gemini 2.5 Pro | 1,048,576 | Medium |
+| `gemini-2.5-flash-preview-05-20` | Gemini 2.5 Flash | 1,048,576 | Low |
+| `gemini-2.0-flash` | Gemini 2.0 Flash | 1,048,576 | Low (Free tier) |
+| `gemini-2.0-flash-lite` | Gemini 2.0 Flash Lite | 1,048,576 | Low (Free tier) |
+
+#### 3.11.4 Multimodal & File Support
+
+- Images: Sent as `inlineData` with `mimeType` and base64 `data`
+- Documents: Text prepended to prompt (same as other providers)
+- File upload: Via Gemini Files API (`media.upload` endpoint) for files > 20 MB
+
+#### 3.11.5 Integration
+
+- Implements `ILlmProvider` interface
+- Registered in `ProviderFactory` dictionary
+- `ProviderName` enum extended with `Google` value
+- API key stored in `keys.dat` alongside Anthropic and OpenAI keys
+- Independent rate limiter instance
+
+### 3.12 Rate Limit Tracker
+
+#### 3.12.1 Overview
+
+The Rate Limit Tracker provides real-time visibility into API call budgets across all configured providers and models. Users can see at a glance which models are available, which are nearing their limit, and how long to wait before a rate-limited model becomes available again.
+
+#### 3.12.2 Per-Provider Rate Limit Status
+
+Each provider maintains an independent sliding-window rate limiter. The tracker exposes:
+
+| Metric | Description |
+|--------|-------------|
+| **Remaining Calls** | Number of API calls available in the current window |
+| **Window Size** | Configurable time window (default: 10 minutes) |
+| **Time Until Reset** | Countdown until the oldest call exits the window, freeing a slot |
+| **Usage Percentage** | `(used / max) × 100` — drives the visual progress bar |
+
+#### 3.12.3 Model Availability Matrix
+
+The tracker shows a table of all models grouped by provider:
+
+```
+┌──────────────┬──────────────────┬───────────┬──────────────────┐
+│ Provider     │ Model            │ Status    │ Wait Time        │
+├──────────────┼──────────────────┼───────────┼──────────────────┤
+│ Anthropic    │ Claude Sonnet 4  │ ✅ Ready  │ —                │
+│ Anthropic    │ Claude Haiku 4.5 │ ✅ Ready  │ —                │
+│ OpenAI       │ GPT-5.2          │ ❌ Limited│ ~3m 45s          │
+│ OpenAI       │ GPT-4.1 Mini     │ ❌ Limited│ ~3m 45s          │
+│ Google       │ Gemini 2.0 Flash │ ✅ Ready  │ —                │
+└──────────────┴──────────────────┴───────────┴──────────────────┘
+```
+
+Since rate limits are **per-provider** (not per-model), all models under the same provider share the same status.
+
+#### 3.12.4 Status Levels
+
+| Status | Condition | Color | Description |
+|--------|-----------|-------|-------------|
+| ✅ Available | > 10% calls remaining | Green | Model ready for use |
+| ⚠️ Near Limit | ≤ 10% calls remaining, > 0 | Yellow | Approaching limit, use sparingly |
+| ❌ Rate Limited | 0 calls remaining | Red | Wait for window to expire |
+
+#### 3.12.5 Wait Time Calculation
+
+When a provider is rate-limited (0 remaining calls):
+1. Find the **oldest** timestamp in the sliding window
+2. Wait time = `oldest_timestamp + window_duration - now`
+3. This is the time until one slot frees up
+4. Displayed as `"~Xm Ys"` (rounded to nearest second)
+
+#### 3.12.6 Smart Model Suggestion
+
+When the currently active model's provider is rate-limited, the tracker suggests an alternative:
+1. Prefer a model from another provider that is still available
+2. Within the same tier (e.g., if using a "High" tier model, suggest another "High" tier)
+3. Displayed as: *"GPT-5.2 is rate-limited. Try Claude Sonnet 4 (available, same tier)."*
+
+#### 3.12.7 RateLimiter API Extensions
+
+The `RateLimiter` class is extended with:
+
+| Method/Property | Type | Description |
+|----------------|------|-------------|
+| `RemainingCalls` | `int` (existing) | Calls left in current window |
+| `TimeUntilNextSlot` | `TimeSpan?` | Time until one call slot frees up; `null` if slots available |
+| `UsagePercentage` | `double` | `(used / max) × 100` |
+| `OldestCallTime` | `DateTime?` | Timestamp of the oldest call in the window |
+| `IsNearLimit` | `bool` | `true` when ≤ 10% remaining |
+| `IsLimited` | `bool` | `true` when 0 remaining |
+
+#### 3.12.8 Integration Points
+
+- **Settings Dialog:** New "Rate Limits" tab (§3.4.7) with real-time dashboard
+- **Error Messages:** When rate-limited, the error string now includes wait time and alternative model suggestion:
+  `"Error: OpenAI rate limit exceeded. Wait ~3m 45s or switch to Claude Sonnet 4 (available)."`
+- **Ribbon Indicator (future):** Optional status icon on the ribbon showing overall rate limit health
 
 ---
 
@@ -468,9 +668,9 @@ Users can convert `=USEAI()` and `=USEAI.SINGLE()` formula cells to plain text v
                  │                  │
                  ▼                  ▼
      ┌───────────────────┐  ┌──────────────────┐
-     │ Anthropic API     │  │  OpenAI API      │
-     │ api.anthropic.com │  │  api.openai.com  │
-     └───────────────────┘  └──────────────────┘
+     │ Anthropic API     │  │  OpenAI API      │  │  Gemini API         │
+     │ api.anthropic.com │  │  api.openai.com  │  │  googleapis.com     │
+     └───────────────────┘  └──────────────────┘  └─────────────────────┘
 ```
 
 ### 5.2 Data Flow
@@ -479,9 +679,9 @@ Users can convert `=USEAI()` and `=USEAI.SINGLE()` formula cells to plain text v
 2. Excel calls the registered `[ExcelFunction]` handler
 3. **PromptBuilder** resolves cell references / ranges and constructs the full prompt string
 4. **FileResolver** detects `{...}` references in the prompt, extracts file/URL content (checking **ContentCache** first), and returns a `ResolvedPrompt` with clean text + attachments
-5. **CacheService** computes SHA-256 hash of `{ provider, model, prompt + attachment metadata }` and checks `MemoryCache`
+5. **CacheService** computes SHA-256 hash of `{ prompt + attachment metadata }` and checks `MemoryCache` (cache is prompt-only — shared across providers and models)
 6. **Cache hit:** Return cached response immediately (already markdown-stripped)
-7. **Cache miss:** `ExcelAsyncUtil.Observe()` dispatches async work (cell shows `"Loading..."`) → **RateLimiter** checks call budget → **FileUploadCache** checks if attachments need uploading (uploads via Files API if not cached) → **ILlmProvider** sends HTTP request (using `file_id` references or inline content)
+3. **Cache miss:** `ExcelAsyncUtil.Observe()` dispatches async work (cell shows `"Loading..."`) → **RateLimiter** checks call budget (if rate-limited, returns error with wait time + alternative model suggestion) → **FileUploadCache** checks if attachments need uploading (uploads via Files API if not cached) → **ILlmProvider** sends HTTP request (using `file_id` references or inline content) with system prompt (§3.9) and generation parameters (§3.10)
 8. Response is markdown-stripped, cached, and formatted for Excel (single value or 2D array)
 9. If `USEAI`: multi-line responses spill as rows; tabular (pipe-delimited) responses spill as 2D arrays with numeric parsing. If `USEAI.SINGLE`: full text returned in one cell with embedded line breaks.
 
@@ -526,7 +726,7 @@ content-type: application/json
 }
 ```
 
-Note: No `system` message is sent by the .NET provider. The `max_tokens` default is 8192.
+When a system prompt is configured (§3.9), it is sent as the top-level `"system"` field. When temperature/parameters are configured (§3.10), they are sent in the request body as `"temperature"`, `"top_p"`.
 
 **Response (extract):**
 ```json
@@ -564,7 +764,7 @@ Content-type: application/json
 }
 ```
 
-Note: GPT-5.x models use `max_completion_tokens` instead of `max_tokens`. No `system` message is sent by the .NET provider. The `max_tokens` default is 8192.
+Note: GPT-5.x models use `max_completion_tokens` instead of `max_tokens`. When a system prompt is configured (§3.9), it is sent as a `{"role": "system", "content": "..."}` message before the user message. Temperature and Top P (§3.10) are sent as `"temperature"` and `"top_p"` in the request body.
 
 ```json
 {
@@ -592,6 +792,55 @@ Note: GPT-5.x models use `max_completion_tokens` instead of `max_tokens`. No `sy
 }
 ```
 
+### 6.3 Google Gemini — Generate Content API
+
+**Endpoint:** `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
+
+**Request Headers:**
+```
+x-goog-api-key: <user_api_key>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "systemInstruction": {
+    "parts": [{ "text": "<system_prompt>" }]
+  },
+  "contents": [
+    {
+      "role": "user",
+      "parts": [{ "text": "<constructed_prompt>" }]
+    }
+  ],
+  "generationConfig": {
+    "temperature": 1.0,
+    "topP": 1.0,
+    "maxOutputTokens": 8192
+  }
+}
+```
+
+Note: The `systemInstruction` field is omitted when no system prompt is configured. The `generationConfig` values come from user settings (§3.10).
+
+**Response (extract):**
+```json
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [{ "text": "<response_text>" }]
+      }
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 100,
+    "candidatesTokenCount": 200
+  }
+}
+```
+
 ---
 
 ## 7. Error Handling
@@ -603,7 +852,7 @@ Note: GPT-5.x models use `max_completion_tokens` instead of `max_tokens`. No `sy
 | No API key configured | `"Error: No API key configured for <provider>. Click 'AI Settings' in the ribbon."` | — |
 | Empty prompt | `"Error: Prompt cannot be empty."` | `#VALUE!` |
 | Prompt too large (>100,000 chars) | `"Error: Prompt too large. Reduce prompt or context size."` | `#VALUE!` |
-| Rate limit exceeded (client-side) | `"Error: Rate limit exceeded. Wait and try again."` | — |
+| Rate limit exceeded (client-side) | `"Error: <Provider> rate limit exceeded. Wait ~Xm Ys or switch to <Alternative Model> (available)."` | — |
 | API rate limit (429) | `"Error: API rate limit reached. Wait and retry."` | — |
 | API authentication error (401/403) | `"Error: Invalid API key for <provider>. Check your key in the settings."` | — |
 | Network timeout | `"Error: Request timed out. Try a simpler prompt or check your connection."` | — |
@@ -622,8 +871,10 @@ Custom functions return descriptive error strings rather than Excel error codes 
 ### 8.1 Cache Key Generation
 
 ```
-cacheKey = SHA-256( provider + "|" + model + "|" + promptFingerprint )
+cacheKey = SHA-256( promptFingerprint )
 ```
+
+The cache key is **prompt-only** — it does not include the provider or model. This means cached results are shared across providers and models: switching from OpenAI to Claude (or vice versa) reuses existing cached results as long as the prompt content is unchanged. This prevents unnecessary API calls when the user changes model settings, applies filters, or deletes rows.
 
 For prompts ≤ 2048 characters, the full prompt is hashed. For longer prompts, a fingerprint is used: `length + first 512 chars + last 512 chars`.
 

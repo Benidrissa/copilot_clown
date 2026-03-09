@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -14,7 +15,7 @@ public static class UseAiFunction
 {
     private static readonly CacheService Cache = new CacheService();
     private static readonly SettingsService Settings = new SettingsService();
-    private static readonly RateLimiter RateLimiter = new RateLimiter();
+    private static readonly ConcurrentDictionary<ProviderName, RateLimiter> RateLimiters = new ConcurrentDictionary<ProviderName, RateLimiter>();
     private static readonly ContentCache FileCache = new ContentCache();
     private static readonly FileUploadCache UploadCache = new FileUploadCache();
     private static readonly FileResolver Resolver = new FileResolver(FileCache);
@@ -29,7 +30,9 @@ public static class UseAiFunction
     // Expose services for the settings UI
     internal static CacheService CacheInstance => Cache;
     internal static SettingsService SettingsInstance => Settings;
-    internal static RateLimiter RateLimiterInstance => RateLimiter;
+    internal static RateLimiter GetRateLimiter(ProviderName p) =>
+        RateLimiters.GetOrAdd(p, _ => new RateLimiter());
+    internal static ConcurrentDictionary<ProviderName, RateLimiter> AllRateLimiters => RateLimiters;
     internal static ContentCache FileCacheInstance => FileCache;
     internal static FileUploadCache UploadCacheInstance => UploadCache;
 
@@ -112,22 +115,44 @@ public static class UseAiFunction
         // Check cache (cached values are already markdown-stripped)
         if (settings.CacheEnabled)
         {
-            var cached = Cache.Get(provider, model, cachePromptKey);
+            var cached = Cache.Get(cachePromptKey);
             if (cached != null)
                 return FormatResponse(cached, singleCell);
         }
 
         // Use ExcelAsyncUtil.Observe for async API call with "Loading..." indicator
-        var asyncKey = $"{provider}|{model}|{cachePromptKey}|{(singleCell ? "S" : "M")}";
+        var asyncKey = $"{cachePromptKey}|{(singleCell ? "S" : "M")}";
         return ExcelAsyncUtil.Observe(
             singleCell ? "USEAI.SINGLE" : "USEAI",
             asyncKey,
             () => new LoadingObservable(() =>
             {
-                // Rate limit
-                RateLimiter.UpdateLimits(settings.RateLimitMax, settings.RateLimitWindowMinutes);
-                if (!RateLimiter.TryAcquire())
-                    return (object)"Error: Rate limit exceeded. Wait and try again.";
+                // Double-check cache inside the observable — prevents API calls
+                // when Excel recalculates (e.g. row delete) and Observe() creates
+                // a new subscription even though the result is already cached.
+                if (settings.CacheEnabled)
+                {
+                    var cached = Cache.Get(cachePromptKey);
+                    if (cached != null)
+                        return FormatResponse(cached, singleCell);
+                }
+
+                // Rate limit (per provider)
+                var limiter = GetRateLimiter(provider);
+                limiter.UpdateLimits(settings.RateLimitMax, settings.RateLimitWindowMinutes);
+                if (!limiter.TryAcquire())
+                {
+                    var waitTime = limiter.FormatWaitTime();
+                    var suggestion = FindAlternativeModel(provider, settings);
+                    var msg = $"Error: {provider} rate limit exceeded.";
+                    if (waitTime != null)
+                        msg += $" Wait {waitTime}";
+                    if (suggestion != null)
+                        msg += $" or switch to {suggestion}";
+                    else if (waitTime != null)
+                        msg += ".";
+                    return (object)msg;
+                }
 
                 try
                 {
@@ -137,14 +162,14 @@ public static class UseAiFunction
                     if (resolved.HasAttachments)
                         UploadAttachments(llm, resolved, provider, apiKey);
 
-                    var result = llm.CompleteAsync(resolved, apiKey, model, ct: CancellationToken.None)
+                    var result = llm.CompleteAsync(resolved, apiKey, model, settings, ct: CancellationToken.None)
                         .GetAwaiter().GetResult();
 
                     // Strip markdown ONCE, then cache the clean version
                     var cleanText = StripMarkdown(result.Text.Trim());
 
                     if (settings.CacheEnabled)
-                        Cache.Set(provider, model, cachePromptKey, cleanText, settings.CacheTtlMinutes);
+                        Cache.Set(cachePromptKey, cleanText, settings.CacheTtlMinutes);
 
                     return FormatResponse(cleanText, singleCell);
                 }
@@ -445,6 +470,51 @@ public static class UseAiFunction
         for (int i = 0; i < splitLines.Length; i++)
             spill[i, 0] = FitCell(splitLines[i].Trim());
         return spill;
+    }
+
+    /// <summary>
+    /// Find an alternative model from another provider that is not rate-limited.
+    /// Returns a suggestion string like "Claude Sonnet 4 (available)" or null.
+    /// </summary>
+    private static string FindAlternativeModel(ProviderName currentProvider, AppSettings settings)
+    {
+        // Get the current model's pricing tier for matching
+        string currentTier = null;
+        foreach (var m in ModelRegistry.AllModels)
+        {
+            if (m.Id == settings.ActiveModel)
+            {
+                currentTier = m.PricingTier;
+                break;
+            }
+        }
+
+        // Check other providers
+        foreach (ProviderName altProvider in Enum.GetValues(typeof(ProviderName)))
+        {
+            if (altProvider == currentProvider) continue;
+
+            var altLimiter = GetRateLimiter(altProvider);
+            if (altLimiter.IsLimited) continue;
+
+            var models = ModelRegistry.GetModels(altProvider);
+            // Prefer same pricing tier
+            ModelInfo bestMatch = null;
+            foreach (var m in models)
+            {
+                if (m.PricingTier == currentTier)
+                {
+                    bestMatch = m;
+                    break;
+                }
+            }
+            if (bestMatch == null && models.Length > 0)
+                bestMatch = models[0];
+
+            if (bestMatch != null)
+                return $"{bestMatch.DisplayName} (available)";
+        }
+        return null;
     }
 
     // ───────────────────────────────────────────────────────────────

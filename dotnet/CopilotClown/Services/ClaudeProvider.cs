@@ -28,6 +28,13 @@ public class ClaudeProvider : ILlmProvider
     public async Task<CompletionResponse> CompleteAsync(
         ResolvedPrompt prompt, string apiKey, string model, int maxTokens = 8192, CancellationToken ct = default)
     {
+        return await CompleteAsync(prompt, apiKey, model, new AppSettings { MaxTokens = maxTokens }, ct);
+    }
+
+    public async Task<CompletionResponse> CompleteAsync(
+        ResolvedPrompt prompt, string apiKey, string model, AppSettings settings, CancellationToken ct = default)
+    {
+        var maxTokens = settings.MaxTokens;
         object content;
 
         if (!prompt.HasAttachments)
@@ -45,6 +52,16 @@ public class ClaudeProvider : ILlmProvider
             { "max_tokens", maxTokens },
             { "messages", new[] { new Dictionary<string, object> { { "role", "user" }, { "content", content } } } }
         };
+
+        // Anthropic: temperature and top_p are mutually exclusive — send only one.
+        // Prefer temperature unless user left it at default and changed top_p.
+        if (Math.Abs(settings.TopP - 1.0) > 0.001 && Math.Abs(settings.Temperature - 1.0) < 0.001)
+            requestBody["top_p"] = settings.TopP;
+        else
+            requestBody["temperature"] = settings.Temperature;
+
+        if (!string.IsNullOrWhiteSpace(settings.SystemPrompt))
+            requestBody["system"] = settings.SystemPrompt;
 
         var request = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages")
         {
