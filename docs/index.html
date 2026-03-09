@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Copilot Clown — AI in Every Excel Cell</title>
-  <meta name="description" content="Free, open-source Excel add-in with =USEAI() function. Bring Your Own Key — supports Anthropic Claude, OpenAI GPT, and Google Gemini.">
+  <title>=USEAI() — Bring AI to Any Excel Cell</title>
+  <meta name="description" content="Free, open-source Excel add-in with =USEAI() function. Bring Your Own Key — supports Anthropic Claude, OpenAI GPT, and Google Gemini. Built for analysts, consultants, and finance teams.">
   <style>
     :root {
       --primary: #2563eb;
@@ -110,8 +110,8 @@
 
   <!-- Hero -->
   <header class="hero">
-    <h1>&#129313; Copilot <span>Clown</span></h1>
-    <p class="tagline">Free, open-source Excel add-in that puts AI in every cell. Bring Your Own API Key.</p>
+    <h1>&#129313; =USEAI() <span>for Excel</span></h1>
+    <p class="tagline">Bring AI to any Excel cell, today. Free, open-source add-in — Bring Your Own API Key.</p>
     <div class="formula">=USEAI("Summarize this data", A1:D50)</div>
     <div class="btn-row">
       <a href="https://github.com/Benidrissa/copilot_clown/releases/latest" class="btn btn-primary">
@@ -125,41 +125,49 @@
     </div>
   </header>
 
-  <!-- Features -->
+  <!-- What it does -->
   <section class="section">
-    <h2>Why Copilot Clown?</h2>
+    <h2>How It Works</h2>
+    <p style="text-align:center; color: var(--muted); max-width: 640px; margin: 0 auto 2rem;">Type <code>=USEAI("Summarize this data", A1:D50)</code> in any cell, and get instant AI-powered answers — no VBA, no macros, no server setup.</p>
+    <h2 style="margin-top:2.5rem;">What Makes It Different</h2>
     <div class="features">
       <div class="feature-card">
         <div class="icon">&#128273;</div>
-        <h3>Bring Your Own Key</h3>
-        <p>Use your own API key from Anthropic, OpenAI, or Google. You control costs and data privacy.</p>
+        <h3>Bring Your Own Key (BYOK)</h3>
+        <p>Works with Anthropic Claude, OpenAI GPT, and Google Gemini. You choose the model, you control the cost.</p>
       </div>
       <div class="feature-card">
         <div class="icon">&#128196;</div>
-        <h3>File Attachments</h3>
-        <p>Reference Word docs, PDFs, images, and URLs directly in formulas with <code>{path}</code> syntax.</p>
+        <h3>File-Aware Prompts</h3>
+        <p>Reference Word docs, PDFs, images, and URLs directly in your formulas with <code>{C:\report.pdf}</code> syntax. Content is extracted and sent automatically.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">&#128200;</div>
+        <h3>Spills Like Native Excel</h3>
+        <p>Returns tables, lists, or single values. Integrates naturally with your existing workflows.</p>
       </div>
       <div class="feature-card">
         <div class="icon">&#9889;</div>
         <h3>Smart Caching</h3>
-        <p>3-layer cache saves API costs. Identical prompts served instantly from memory.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">&#128200;</div>
-        <h3>Native Spill</h3>
-        <p>Returns tables, lists, or single values that spill naturally into adjacent cells.</p>
-      </div>
-      <div class="feature-card">
-        <div class="icon">&#128230;</div>
-        <h3>One File, Zero Setup</h3>
-        <p>Self-contained .xll file. No Python, no server, no cloud deployment. Drag into Excel.</p>
+        <p>Identical prompts are served from memory, saving API calls and money.</p>
       </div>
       <div class="feature-card">
         <div class="icon">&#128737;</div>
-        <h3>Rate Limiting</h3>
-        <p>Built-in per-provider sliding-window limiter protects your API budget automatically.</p>
+        <h3>Per-Provider Rate Limiting</h3>
+        <p>Built-in safeguards so you never blow through your API budget.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">&#128230;</div>
+        <h3>Zero Infrastructure</h3>
+        <p>One .xll file, drag into Excel, done. No Python, no server, no cloud deployment.</p>
       </div>
     </div>
+  </section>
+
+  <!-- Built for -->
+  <section class="section" style="text-align: center;">
+    <h2>Built for Professionals Who Live in Excel</h2>
+    <p style="color: var(--muted); max-width: 600px; margin: 0 auto;">Analysts, consultants, project managers, finance teams — anyone who needs AI assistance without leaving their spreadsheet.</p>
   </section>
 
   <!-- How it works -->
@@ -236,7 +244,7 @@
   <!-- Footer -->
   <footer>
     <p>
-      <strong>Copilot Clown</strong> &mdash; by <a href="mailto:traore.benidrissa@gmail.com">Ben Idrissa TRAORE</a>
+      <strong>=USEAI() for Excel</strong> &mdash; by <a href="mailto:traore.benidrissa@gmail.com">Ben Idrissa TRAORE</a>
       &bull; <a href="https://github.com/Benidrissa/copilot_clown">GitHub</a>
       &bull; Open source under MIT License
     </p>
