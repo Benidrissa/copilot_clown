@@ -32,6 +32,7 @@ public static class UseAiFunction
     internal static SettingsService SettingsInstance => Settings;
     internal static RateLimiter GetRateLimiter(ProviderName p) =>
         RateLimiters.GetOrAdd(p, _ => new RateLimiter());
+    internal static ConcurrentDictionary<ProviderName, RateLimiter> AllRateLimiters => RateLimiters;
     internal static ContentCache FileCacheInstance => FileCache;
     internal static FileUploadCache UploadCacheInstance => UploadCache;
 
@@ -140,7 +141,18 @@ public static class UseAiFunction
                 var limiter = GetRateLimiter(provider);
                 limiter.UpdateLimits(settings.RateLimitMax, settings.RateLimitWindowMinutes);
                 if (!limiter.TryAcquire())
-                    return (object)$"Error: {provider} rate limit exceeded. Wait and try again.";
+                {
+                    var waitTime = limiter.FormatWaitTime();
+                    var suggestion = FindAlternativeModel(provider, settings);
+                    var msg = $"Error: {provider} rate limit exceeded.";
+                    if (waitTime != null)
+                        msg += $" Wait {waitTime}";
+                    if (suggestion != null)
+                        msg += $" or switch to {suggestion}";
+                    else if (waitTime != null)
+                        msg += ".";
+                    return (object)msg;
+                }
 
                 try
                 {
@@ -150,7 +162,7 @@ public static class UseAiFunction
                     if (resolved.HasAttachments)
                         UploadAttachments(llm, resolved, provider, apiKey);
 
-                    var result = llm.CompleteAsync(resolved, apiKey, model, ct: CancellationToken.None)
+                    var result = llm.CompleteAsync(resolved, apiKey, model, settings, ct: CancellationToken.None)
                         .GetAwaiter().GetResult();
 
                     // Strip markdown ONCE, then cache the clean version
@@ -458,6 +470,51 @@ public static class UseAiFunction
         for (int i = 0; i < splitLines.Length; i++)
             spill[i, 0] = FitCell(splitLines[i].Trim());
         return spill;
+    }
+
+    /// <summary>
+    /// Find an alternative model from another provider that is not rate-limited.
+    /// Returns a suggestion string like "Claude Sonnet 4 (available)" or null.
+    /// </summary>
+    private static string FindAlternativeModel(ProviderName currentProvider, AppSettings settings)
+    {
+        // Get the current model's pricing tier for matching
+        string currentTier = null;
+        foreach (var m in ModelRegistry.AllModels)
+        {
+            if (m.Id == settings.ActiveModel)
+            {
+                currentTier = m.PricingTier;
+                break;
+            }
+        }
+
+        // Check other providers
+        foreach (ProviderName altProvider in Enum.GetValues(typeof(ProviderName)))
+        {
+            if (altProvider == currentProvider) continue;
+
+            var altLimiter = GetRateLimiter(altProvider);
+            if (altLimiter.IsLimited) continue;
+
+            var models = ModelRegistry.GetModels(altProvider);
+            // Prefer same pricing tier
+            ModelInfo bestMatch = null;
+            foreach (var m in models)
+            {
+                if (m.PricingTier == currentTier)
+                {
+                    bestMatch = m;
+                    break;
+                }
+            }
+            if (bestMatch == null && models.Length > 0)
+                bestMatch = models[0];
+
+            if (bestMatch != null)
+                return $"{bestMatch.DisplayName} (available)";
+        }
+        return null;
     }
 
     // ───────────────────────────────────────────────────────────────

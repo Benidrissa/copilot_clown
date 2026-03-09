@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -17,12 +18,15 @@ public class SettingsForm : Form
     // API Keys tab
     private TextBox _txtClaudeKey;
     private TextBox _txtOpenAIKey;
+    private TextBox _txtGeminiKey;
     private Label _lblClaudeStatus;
     private Label _lblOpenAIStatus;
+    private Label _lblGeminiStatus;
 
     // Model tab
     private RadioButton _rbClaude;
     private RadioButton _rbOpenAI;
+    private RadioButton _rbGemini;
     private ComboBox _cboModel;
     private Label _lblModelInfo;
 
@@ -33,6 +37,21 @@ public class SettingsForm : Form
 
     // Tools tab
     private Label _lblToolsStatus;
+
+    // System Prompt tab
+    private TextBox _txtSystemPrompt;
+    private Label _lblSystemPromptCount;
+
+    // Parameters tab
+    private TrackBar _trkTemperature;
+    private Label _lblTemperatureValue;
+    private NumericUpDown _nudMaxTokens;
+    private TrackBar _trkTopP;
+    private Label _lblTopPValue;
+
+    // Rate Limits tab
+    private Label _lblRateLimitInfo;
+    private Timer _rateLimitTimer;
 
     public SettingsForm()
     {
@@ -45,7 +64,7 @@ public class SettingsForm : Form
     private void InitializeComponents()
     {
         Text = "Copilot Clown -- AI Settings";
-        Size = new Size(460, 480);
+        Size = new Size(520, 540);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
@@ -54,7 +73,10 @@ public class SettingsForm : Form
 
         tabs.TabPages.Add(CreateApiKeysTab());
         tabs.TabPages.Add(CreateModelTab());
+        tabs.TabPages.Add(CreateSystemPromptTab());
+        tabs.TabPages.Add(CreateParametersTab());
         tabs.TabPages.Add(CreateCacheTab());
+        tabs.TabPages.Add(CreateRateLimitsTab());
         tabs.TabPages.Add(CreateToolsTab());
 
         Controls.Add(tabs);
@@ -107,6 +129,24 @@ public class SettingsForm : Form
         _lblOpenAIStatus = new Label { AutoSize = true, ForeColor = Color.Gray, Text = "" };
         layout.Controls.Add(_lblOpenAIStatus);
 
+        // Spacer
+        layout.Controls.Add(new Label { Height = 16 });
+
+        // Google Gemini section
+        layout.Controls.Add(new Label { Text = "Google (Gemini) API Key:", AutoSize = true, Font = new Font(Font, FontStyle.Bold) });
+        _txtGeminiKey = new TextBox { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
+        layout.Controls.Add(_txtGeminiKey);
+
+        var geminiBtnPanel = new FlowLayoutPanel { AutoSize = true };
+        var btnSaveGemini = new Button { Text = "Save", Width = 70 };
+        btnSaveGemini.Click += (s, e) => SaveApiKey(ProviderName.Google, _txtGeminiKey.Text);
+        var btnTestGemini = new Button { Text = "Test", Width = 70 };
+        btnTestGemini.Click += async (s, e) => await TestApiKey(ProviderName.Google, _txtGeminiKey.Text, _lblGeminiStatus);
+        geminiBtnPanel.Controls.AddRange(new Control[] { btnSaveGemini, btnTestGemini });
+        layout.Controls.Add(geminiBtnPanel);
+        _lblGeminiStatus = new Label { AutoSize = true, ForeColor = Color.Gray, Text = "" };
+        layout.Controls.Add(_lblGeminiStatus);
+
         page.Controls.Add(layout);
         return page;
     }
@@ -123,9 +163,11 @@ public class SettingsForm : Form
         var providerPanel = new FlowLayoutPanel { AutoSize = true };
         _rbClaude = new RadioButton { Text = "Claude (Anthropic)", AutoSize = true };
         _rbOpenAI = new RadioButton { Text = "OpenAI", AutoSize = true };
+        _rbGemini = new RadioButton { Text = "Google Gemini", AutoSize = true };
         _rbClaude.CheckedChanged += (s, e) => RefreshModelList();
         _rbOpenAI.CheckedChanged += (s, e) => RefreshModelList();
-        providerPanel.Controls.AddRange(new Control[] { _rbClaude, _rbOpenAI });
+        _rbGemini.CheckedChanged += (s, e) => RefreshModelList();
+        providerPanel.Controls.AddRange(new Control[] { _rbClaude, _rbOpenAI, _rbGemini });
         layout.Controls.Add(providerPanel);
 
         layout.Controls.Add(new Label { Text = "Model:", AutoSize = true, Font = new Font(Font, FontStyle.Bold) });
@@ -180,6 +222,139 @@ public class SettingsForm : Form
 
         page.Controls.Add(layout);
         return page;
+    }
+
+    // ── System Prompt Tab ──────────────────────────────────────────
+
+    private TabPage CreateSystemPromptTab()
+    {
+        var page = new TabPage("System Prompt") { Padding = new Padding(12) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+
+        layout.Controls.Add(new Label
+        {
+            Text = "System prompt sent with every API call (persona / global instructions):",
+            AutoSize = true,
+            Font = new Font(Font, FontStyle.Bold)
+        });
+
+        _txtSystemPrompt = new TextBox
+        {
+            Dock = DockStyle.Fill,
+            Multiline = true,
+            ScrollBars = ScrollBars.Vertical,
+            Height = 200,
+            MaxLength = 10000
+        };
+        _txtSystemPrompt.TextChanged += (s, e) =>
+        {
+            _lblSystemPromptCount.Text = $"{_txtSystemPrompt.Text.Length} / 10,000 characters";
+        };
+        layout.Controls.Add(_txtSystemPrompt);
+
+        _lblSystemPromptCount = new Label { AutoSize = true, ForeColor = Color.Gray, Text = "0 / 10,000 characters" };
+        layout.Controls.Add(_lblSystemPromptCount);
+
+        var btnPanel = new FlowLayoutPanel { AutoSize = true };
+        var btnSave = new Button { Text = "Save", Width = 70 };
+        btnSave.Click += (s, e) => SaveSystemPrompt();
+        var btnClear = new Button { Text = "Clear", Width = 70 };
+        btnClear.Click += (s, e) => { _txtSystemPrompt.Text = ""; SaveSystemPrompt(); };
+        btnPanel.Controls.AddRange(new Control[] { btnSave, btnClear });
+        layout.Controls.Add(btnPanel);
+
+        page.Controls.Add(layout);
+        return page;
+    }
+
+    // ── Parameters Tab ─────────────────────────────────────────────
+
+    private TabPage CreateParametersTab()
+    {
+        var page = new TabPage("Parameters") { Padding = new Padding(12) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 10 };
+
+        // Temperature
+        layout.Controls.Add(new Label { Text = "Temperature (0.0 = deterministic, 2.0 = creative):", AutoSize = true, Font = new Font(Font, FontStyle.Bold) });
+        _trkTemperature = new TrackBar { Minimum = 0, Maximum = 200, TickFrequency = 10, Dock = DockStyle.Fill };
+        _lblTemperatureValue = new Label { AutoSize = true, ForeColor = Color.Gray };
+        _trkTemperature.ValueChanged += (s, e) =>
+        {
+            _lblTemperatureValue.Text = $"{_trkTemperature.Value / 100.0:F2}";
+        };
+        layout.Controls.Add(_trkTemperature);
+        layout.Controls.Add(_lblTemperatureValue);
+
+        // Max Tokens
+        layout.Controls.Add(new Label { Text = "Max Tokens (response length):", AutoSize = true, Font = new Font(Font, FontStyle.Bold) });
+        _nudMaxTokens = new NumericUpDown { Minimum = 1, Maximum = 32768, Dock = DockStyle.Fill };
+        layout.Controls.Add(_nudMaxTokens);
+
+        // Top P
+        layout.Controls.Add(new Label { Text = "Top P (nucleus sampling, 0.0 – 1.0):", AutoSize = true, Font = new Font(Font, FontStyle.Bold) });
+        _trkTopP = new TrackBar { Minimum = 0, Maximum = 100, TickFrequency = 5, Dock = DockStyle.Fill };
+        _lblTopPValue = new Label { AutoSize = true, ForeColor = Color.Gray };
+        _trkTopP.ValueChanged += (s, e) =>
+        {
+            _lblTopPValue.Text = $"{_trkTopP.Value / 100.0:F2}";
+        };
+        layout.Controls.Add(_trkTopP);
+        layout.Controls.Add(_lblTopPValue);
+
+        var btnSave = new Button { Text = "Save Parameters", Width = 130 };
+        btnSave.Click += (s, e) => SaveParameters();
+        layout.Controls.Add(btnSave);
+
+        page.Controls.Add(layout);
+        return page;
+    }
+
+    // ── Rate Limits Tab ────────────────────────────────────────────
+
+    private TabPage CreateRateLimitsTab()
+    {
+        var page = new TabPage("Rate Limits") { Padding = new Padding(12) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+
+        layout.Controls.Add(new Label
+        {
+            Text = "Per-Provider Rate Limit Status (refreshes every 5s):",
+            AutoSize = true,
+            Font = new Font(Font, FontStyle.Bold)
+        });
+
+        _lblRateLimitInfo = new Label
+        {
+            AutoSize = true,
+            Font = new Font("Consolas", 9),
+            Text = "Loading..."
+        };
+        layout.Controls.Add(_lblRateLimitInfo);
+
+        var btnReset = new Button { Text = "Reset All Counters", Width = 140 };
+        btnReset.Click += (s, e) =>
+        {
+            foreach (var kv in UseAiFunction.AllRateLimiters)
+                kv.Value.Reset();
+            RefreshRateLimitInfo();
+        };
+        layout.Controls.Add(btnReset);
+
+        // Auto-refresh timer
+        _rateLimitTimer = new Timer { Interval = 5000 };
+        _rateLimitTimer.Tick += (s, e) => RefreshRateLimitInfo();
+        _rateLimitTimer.Start();
+
+        page.Controls.Add(layout);
+        RefreshRateLimitInfo();
+        return page;
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        _rateLimitTimer?.Stop();
+        _rateLimitTimer?.Dispose();
+        base.OnFormClosed(e);
     }
 
     // ── Tools Tab ─────────────────────────────────────────────────
@@ -302,10 +477,14 @@ public class SettingsForm : Form
         if (claudeKey != null) _txtClaudeKey.Text = claudeKey;
         var openaiKey = _settings.GetApiKey(ProviderName.OpenAI);
         if (openaiKey != null) _txtOpenAIKey.Text = openaiKey;
+        var geminiKey = _settings.GetApiKey(ProviderName.Google);
+        if (geminiKey != null) _txtGeminiKey.Text = geminiKey;
 
         // Provider & model
         if (s.ActiveProvider == ProviderName.Anthropic)
             _rbClaude.Checked = true;
+        else if (s.ActiveProvider == ProviderName.Google)
+            _rbGemini.Checked = true;
         else
             _rbOpenAI.Checked = true;
         RefreshModelList();
@@ -323,11 +502,28 @@ public class SettingsForm : Form
             _ => 2,
         };
         RefreshCacheStats();
+
+        // System prompt
+        _txtSystemPrompt.Text = s.SystemPrompt ?? "";
+        _lblSystemPromptCount.Text = $"{_txtSystemPrompt.Text.Length} / 10,000 characters";
+
+        // Parameters
+        _trkTemperature.Value = Math.Max(0, Math.Min(200, (int)(s.Temperature * 100)));
+        _lblTemperatureValue.Text = $"{s.Temperature:F2}";
+        _nudMaxTokens.Value = Math.Max(1, Math.Min(32768, s.MaxTokens));
+        _trkTopP.Value = Math.Max(0, Math.Min(100, (int)(s.TopP * 100)));
+        _lblTopPValue.Text = $"{s.TopP:F2}";
     }
 
     private void RefreshModelList()
     {
-        var provider = _rbClaude.Checked ? ProviderName.Anthropic : ProviderName.OpenAI;
+        ProviderName provider;
+        if (_rbClaude.Checked)
+            provider = ProviderName.Anthropic;
+        else if (_rbGemini.Checked)
+            provider = ProviderName.Google;
+        else
+            provider = ProviderName.OpenAI;
         var models = ModelRegistry.GetModels(provider);
         _cboModel.DataSource = models;
         _cboModel.DisplayMember = "DisplayName";
@@ -376,9 +572,14 @@ public class SettingsForm : Form
         try
         {
             var llm = ProviderFactory.Get(provider);
-            var result = await llm.CompleteAsync("Say OK", key.Trim(),
-                provider == ProviderName.Anthropic ? "claude-3-haiku-20240307" : "gpt-4o-mini",
-                maxTokens: 10);
+            string testModel;
+            switch (provider)
+            {
+                case ProviderName.Anthropic: testModel = "claude-3-haiku-20240307"; break;
+                case ProviderName.Google: testModel = "gemini-2.0-flash-lite"; break;
+                default: testModel = "gpt-4o-mini"; break;
+            }
+            var result = await llm.CompleteAsync("Say OK", key.Trim(), testModel, maxTokens: 10);
             statusLabel.Text = "Valid";
             statusLabel.ForeColor = Color.Green;
             return;
@@ -393,7 +594,12 @@ public class SettingsForm : Form
     private void SaveModelSelection()
     {
         var s = _settings.LoadSettings();
-        s.ActiveProvider = _rbClaude.Checked ? ProviderName.Anthropic : ProviderName.OpenAI;
+        if (_rbClaude.Checked)
+            s.ActiveProvider = ProviderName.Anthropic;
+        else if (_rbGemini.Checked)
+            s.ActiveProvider = ProviderName.Google;
+        else
+            s.ActiveProvider = ProviderName.OpenAI;
         if (_cboModel.SelectedItem is ModelInfo model)
             s.ActiveModel = model.Id;
         _settings.SaveSettings(s);
@@ -415,5 +621,76 @@ public class SettingsForm : Form
         };
         _settings.SaveSettings(s);
         MessageBox.Show("Cache settings saved.", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void SaveSystemPrompt()
+    {
+        var s = _settings.LoadSettings();
+        s.SystemPrompt = _txtSystemPrompt.Text;
+        _settings.SaveSettings(s);
+        MessageBox.Show("System prompt saved.", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void SaveParameters()
+    {
+        var s = _settings.LoadSettings();
+        s.Temperature = _trkTemperature.Value / 100.0;
+        s.MaxTokens = (int)_nudMaxTokens.Value;
+        s.TopP = _trkTopP.Value / 100.0;
+        _settings.SaveSettings(s);
+        MessageBox.Show("Parameters saved.", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void RefreshRateLimitInfo()
+    {
+        var sb = new System.Text.StringBuilder();
+        var providers = new[] { ProviderName.Anthropic, ProviderName.OpenAI, ProviderName.Google };
+
+        foreach (var provider in providers)
+        {
+            var limiter = UseAiFunction.GetRateLimiter(provider);
+            var remaining = limiter.RemainingCalls;
+            var max = limiter.MaxCalls;
+            var usage = limiter.UsagePercentage;
+
+            string status;
+            if (limiter.IsLimited)
+            {
+                var wait = limiter.FormatWaitTime() ?? "<1s";
+                status = $"\u274c Rate Limited (wait {wait})";
+            }
+            else if (limiter.IsNearLimit)
+            {
+                status = "\u26a0\ufe0f Near Limit";
+            }
+            else
+            {
+                status = "\u2705 Available";
+            }
+
+            sb.AppendLine($"{provider}:");
+            sb.AppendLine($"  {remaining} / {max} calls remaining  [{usage:F0}% used]");
+            sb.AppendLine($"  Status: {status}");
+            sb.AppendLine();
+        }
+
+        // Model availability matrix
+        var settings = _settings.LoadSettings();
+        sb.AppendLine("───── Model Availability ─────");
+        foreach (var provider in providers)
+        {
+            var limiter = UseAiFunction.GetRateLimiter(provider);
+            var models = ModelRegistry.GetModels(provider);
+            string icon = limiter.IsLimited ? "\u274c" : limiter.IsNearLimit ? "\u26a0\ufe0f" : "\u2705";
+
+            foreach (var m in models)
+            {
+                var active = m.Id == settings.ActiveModel ? " *" : "";
+                var wait = limiter.IsLimited ? $" (wait {limiter.FormatWaitTime() ?? "<1s"})" : "";
+                sb.AppendLine($"  {icon} {m.DisplayName}{active}{wait}");
+            }
+        }
+
+        _lblRateLimitInfo.Text = sb.ToString();
     }
 }

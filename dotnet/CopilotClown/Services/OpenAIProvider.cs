@@ -28,6 +28,13 @@ public class OpenAIProvider : ILlmProvider
     public async Task<CompletionResponse> CompleteAsync(
         ResolvedPrompt prompt, string apiKey, string model, int maxTokens = 8192, CancellationToken ct = default)
     {
+        return await CompleteAsync(prompt, apiKey, model, new AppSettings { MaxTokens = maxTokens }, ct);
+    }
+
+    public async Task<CompletionResponse> CompleteAsync(
+        ResolvedPrompt prompt, string apiKey, string model, AppSettings settings, CancellationToken ct = default)
+    {
+        var maxTokens = settings.MaxTokens;
         var maxTokensKey = GetMaxTokensKey(model);
 
         object content;
@@ -40,17 +47,25 @@ public class OpenAIProvider : ILlmProvider
             content = BuildMultimodalContent(prompt);
         }
 
+        var messages = new List<Dictionary<string, object>>();
+        if (!string.IsNullOrWhiteSpace(settings.SystemPrompt))
+            messages.Add(new Dictionary<string, object> { { "role", "system" }, { "content", settings.SystemPrompt } });
+        messages.Add(new Dictionary<string, object> { { "role", "user" }, { "content", content } });
+
         var requestBody = new Dictionary<string, object>
         {
             { "model", model },
-            { "messages", new[]
-                {
-                    new Dictionary<string, object> { { "role", "user" }, { "content", content } }
-                }
-            }
+            { "messages", messages.ToArray() }
         };
 
         requestBody[maxTokensKey] = maxTokens;
+
+        // Reasoning models (o1, o3, etc.) don't support temperature/top_p
+        if (!IsReasoningModel(model))
+        {
+            requestBody["temperature"] = settings.Temperature;
+            requestBody["top_p"] = settings.TopP;
+        }
 
         var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
         {
@@ -128,6 +143,13 @@ public class OpenAIProvider : ILlmProvider
         return model.StartsWith("gpt-5", StringComparison.OrdinalIgnoreCase)
             ? "max_completion_tokens"
             : "max_tokens";
+    }
+
+    private static bool IsReasoningModel(string model)
+    {
+        return model.StartsWith("o1", StringComparison.OrdinalIgnoreCase)
+            || model.StartsWith("o3", StringComparison.OrdinalIgnoreCase)
+            || model.StartsWith("o4", StringComparison.OrdinalIgnoreCase);
     }
 
     private static object[] BuildMultimodalContent(ResolvedPrompt prompt)

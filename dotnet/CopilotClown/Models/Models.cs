@@ -6,7 +6,8 @@ namespace CopilotClown.Models;
 public enum ProviderName
 {
     Anthropic,
-    OpenAI
+    OpenAI,
+    Google
 }
 
 public class ModelInfo
@@ -51,6 +52,10 @@ public class AppSettings
     public int RateLimitMax { get; set; } = 500;
     public int RateLimitWindowMinutes { get; set; } = 10;
     public int ApiTimeoutSeconds { get; set; } = 30;
+    public string SystemPrompt { get; set; } = "";
+    public double Temperature { get; set; } = 1.0;
+    public int MaxTokens { get; set; } = 8192;
+    public double TopP { get; set; } = 1.0;
 }
 
 public static class ModelRegistry
@@ -95,8 +100,23 @@ public static class ModelRegistry
         new ModelInfo("gpt-3.5-turbo", "GPT-3.5 Turbo", ProviderName.OpenAI, 16_385, "Low"),
     };
 
-    public static ModelInfo[] GetModels(ProviderName provider) =>
-        provider == ProviderName.Anthropic ? ClaudeModels : OpenAIModels;
+    public static readonly ModelInfo[] GeminiModels = new ModelInfo[]
+    {
+        new ModelInfo("gemini-2.5-pro-preview-06-05", "Gemini 2.5 Pro", ProviderName.Google, 1_048_576, "Medium"),
+        new ModelInfo("gemini-2.5-flash-preview-05-20", "Gemini 2.5 Flash", ProviderName.Google, 1_048_576, "Low"),
+        new ModelInfo("gemini-2.0-flash", "Gemini 2.0 Flash", ProviderName.Google, 1_048_576, "Low"),
+        new ModelInfo("gemini-2.0-flash-lite", "Gemini 2.0 Flash Lite", ProviderName.Google, 1_048_576, "Low"),
+    };
 
-    public static ModelInfo[] AllModels => ClaudeModels.Concat(OpenAIModels).ToArray();
+    public static ModelInfo[] GetModels(ProviderName provider)
+    {
+        switch (provider)
+        {
+            case ProviderName.Anthropic: return ClaudeModels;
+            case ProviderName.Google: return GeminiModels;
+            default: return OpenAIModels;
+        }
+    }
+
+    public static ModelInfo[] AllModels => ClaudeModels.Concat(OpenAIModels).Concat(GeminiModels).ToArray();
 }
