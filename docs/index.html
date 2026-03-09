@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Copilot Clown — AI in Every Excel Cell</title>
+  <meta name="description" content="Free, open-source Excel add-in with =USEAI() function. Bring Your Own Key — supports Anthropic Claude, OpenAI GPT, and Google Gemini.">
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #1e293b;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --green: #16a34a;
+      --accent: #f59e0b;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: var(--text); background: var(--bg); line-height: 1.6; }
+
+    /* Hero */
+    .hero {
+      background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+      color: #fff;
+      text-align: center;
+      padding: 4rem 1.5rem 3rem;
+    }
+    .hero h1 { font-size: 2.8rem; font-weight: 800; margin-bottom: 0.5rem; }
+    .hero h1 span { color: var(--accent); }
+    .hero .tagline { font-size: 1.25rem; opacity: 0.9; max-width: 600px; margin: 0 auto 2rem; }
+    .hero .formula {
+      display: inline-block;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 8px;
+      padding: 0.6rem 1.5rem;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 1.1rem;
+      margin-bottom: 2rem;
+      letter-spacing: 0.5px;
+    }
+    .btn-row { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.85rem 2rem; border-radius: 8px; font-size: 1rem; font-weight: 600;
+      text-decoration: none; transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.2); }
+    .btn-primary { background: #fff; color: var(--primary); }
+    .btn-secondary { background: transparent; color: #fff; border: 2px solid rgba(255,255,255,0.6); }
+    .btn svg { width: 20px; height: 20px; }
+
+    /* Section */
+    .section { max-width: 960px; margin: 0 auto; padding: 3rem 1.5rem; }
+    .section h2 { font-size: 1.8rem; margin-bottom: 1.5rem; text-align: center; }
+
+    /* Features */
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; }
+    .feature-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 1.5rem; transition: box-shadow 0.2s;
+    }
+    .feature-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
+    .feature-card .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+    .feature-card h3 { font-size: 1.1rem; margin-bottom: 0.4rem; }
+    .feature-card p { color: var(--muted); font-size: 0.95rem; }
+
+    /* Downloads */
+    .downloads { background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .downloads table { width: 100%; border-collapse: collapse; }
+    .downloads th { background: #f1f5f9; text-align: left; padding: 0.75rem 1rem; font-size: 0.85rem; text-transform: uppercase; color: var(--muted); letter-spacing: 0.5px; }
+    .downloads td { padding: 0.85rem 1rem; border-top: 1px solid var(--border); }
+    .downloads a { color: var(--primary); font-weight: 600; text-decoration: none; }
+    .downloads a:hover { text-decoration: underline; }
+    .badge {
+      display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 0.15rem 0.5rem;
+      border-radius: 4px; text-transform: uppercase; margin-left: 0.5rem;
+    }
+    .badge-rec { background: #dcfce7; color: var(--green); }
+
+    /* How it works */
+    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; text-align: center; }
+    .step-num { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 1.3rem; font-weight: 700; margin-bottom: 0.75rem; }
+    .steps h3 { font-size: 1rem; margin-bottom: 0.3rem; }
+    .steps p { color: var(--muted); font-size: 0.9rem; }
+
+    /* Providers */
+    .providers { display: flex; justify-content: center; gap: 3rem; flex-wrap: wrap; padding: 1rem 0; }
+    .provider { text-align: center; }
+    .provider .logo { font-size: 2.5rem; margin-bottom: 0.3rem; }
+    .provider span { font-size: 0.95rem; color: var(--muted); font-weight: 500; }
+
+    /* Footer */
+    footer {
+      text-align: center; padding: 2rem 1.5rem; color: var(--muted); font-size: 0.85rem;
+      border-top: 1px solid var(--border); margin-top: 2rem;
+    }
+    footer a { color: var(--primary); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 600px) {
+      .hero h1 { font-size: 2rem; }
+      .hero .formula { font-size: 0.9rem; padding: 0.5rem 1rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero -->
+  <header class="hero">
+    <h1>&#129313; Copilot <span>Clown</span></h1>
+    <p class="tagline">Free, open-source Excel add-in that puts AI in every cell. Bring Your Own API Key.</p>
+    <div class="formula">=USEAI("Summarize this data", A1:D50)</div>
+    <div class="btn-row">
+      <a href="https://github.com/Benidrissa/copilot_clown/releases/latest" class="btn btn-primary">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 16l-6-6h4V4h4v6h4l-6 6zm-8 4h16v-2H4v2z"/></svg>
+        Download Installer
+      </a>
+      <a href="https://github.com/Benidrissa/copilot_clown" class="btn btn-secondary">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.866-.013-1.7-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836a9.6 9.6 0 0 1 2.504.337c1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+  </header>
+
+  <!-- Features -->
+  <section class="section">
+    <h2>Why Copilot Clown?</h2>
+    <div class="features">
+      <div class="feature-card">
+        <div class="icon">&#128273;</div>
+        <h3>Bring Your Own Key</h3>
+        <p>Use your own API key from Anthropic, OpenAI, or Google. You control costs and data privacy.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">&#128196;</div>
+        <h3>File Attachments</h3>
+        <p>Reference Word docs, PDFs, images, and URLs directly in formulas with <code>{path}</code> syntax.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">&#9889;</div>
+        <h3>Smart Caching</h3>
+        <p>3-layer cache saves API costs. Identical prompts served instantly from memory.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">&#128200;</div>
+        <h3>Native Spill</h3>
+        <p>Returns tables, lists, or single values that spill naturally into adjacent cells.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">&#128230;</div>
+        <h3>One File, Zero Setup</h3>
+        <p>Self-contained .xll file. No Python, no server, no cloud deployment. Drag into Excel.</p>
+      </div>
+      <div class="feature-card">
+        <div class="icon">&#128737;</div>
+        <h3>Rate Limiting</h3>
+        <p>Built-in per-provider sliding-window limiter protects your API budget automatically.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="section" style="background: #fff; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); max-width: 100%; padding: 3rem 1.5rem;">
+    <div style="max-width: 960px; margin: 0 auto;">
+      <h2>Get Started in 3 Steps</h2>
+      <div class="steps">
+        <div>
+          <div class="step-num">1</div>
+          <h3>Install</h3>
+          <p>Run the installer or drag the .xll into Excel.</p>
+        </div>
+        <div>
+          <div class="step-num">2</div>
+          <h3>Add API Key</h3>
+          <p>Open AI Settings from the ribbon, paste your key.</p>
+        </div>
+        <div>
+          <div class="step-num">3</div>
+          <h3>Use =USEAI()</h3>
+          <p>Type your prompt in any cell and get AI-powered answers.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Providers -->
+  <section class="section">
+    <h2>Supported Providers</h2>
+    <div class="providers">
+      <div class="provider"><div class="logo">&#129302;</div><span>Anthropic Claude</span></div>
+      <div class="provider"><div class="logo">&#128161;</div><span>OpenAI GPT</span></div>
+      <div class="provider"><div class="logo">&#9670;&#65039;</div><span>Google Gemini</span></div>
+    </div>
+  </section>
+
+  <!-- Downloads -->
+  <section class="section">
+    <h2>Downloads</h2>
+    <div class="downloads">
+      <table>
+        <thead>
+          <tr><th>File</th><th>Description</th><th>Size</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><a href="https://github.com/Benidrissa/copilot_clown/releases/latest/download/CopilotClownSetup.exe">CopilotClownSetup.exe</a><span class="badge badge-rec">Recommended</span></td>
+            <td>Windows installer — auto-registers add-in in Excel</td>
+            <td>4.6 MB</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/Benidrissa/copilot_clown/releases/latest/download/CopilotClown64-packed.xll">CopilotClown64-packed.xll</a></td>
+            <td>64-bit Excel add-in (manual install)</td>
+            <td>2.9 MB</td>
+          </tr>
+          <tr>
+            <td><a href="https://github.com/Benidrissa/copilot_clown/releases/latest/download/CopilotClown-packed.xll">CopilotClown-packed.xll</a></td>
+            <td>32-bit Excel add-in (manual install)</td>
+            <td>3.0 MB</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Requirements -->
+  <section class="section" style="text-align: center;">
+    <h2>Requirements</h2>
+    <p style="color: var(--muted); max-width: 500px; margin: 0 auto;">
+      Windows 10/11 &bull; Microsoft Excel 2013+ (desktop) &bull; .NET Framework 4.8 &bull; API key from Anthropic, OpenAI, or Google
+    </p>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <p>
+      <strong>Copilot Clown</strong> &mdash; by <a href="mailto:traore.benidrissa@gmail.com">Ben Idrissa TRAORE</a>
+      &bull; <a href="https://github.com/Benidrissa/copilot_clown">GitHub</a>
+      &bull; Open source under MIT License
+    </p>
+  </footer>
+
+</body>
+</html>
