@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -39,8 +40,11 @@ public class SettingsForm : Form
     private Label _lblToolsStatus;
 
     // System Prompt tab
+    private ComboBox _cboPromptLibrary;
+    private TextBox _txtPromptName;
     private TextBox _txtSystemPrompt;
     private Label _lblSystemPromptCount;
+    private List<SystemPromptEntry> _prompts;
 
     // Parameters tab
     private TrackBar _trkTemperature;
@@ -244,8 +248,36 @@ public class SettingsForm : Form
     private TabPage CreateSystemPromptTab()
     {
         var page = new TabPage("System Prompt") { Padding = new Padding(12) };
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 8 };
 
+        // Saved prompts dropdown
+        layout.Controls.Add(new Label
+        {
+            Text = "Saved Prompts:",
+            AutoSize = true,
+            Font = new Font(Font, FontStyle.Bold)
+        });
+
+        var selectorPanel = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+        _cboPromptLibrary = new ComboBox { Width = 250, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cboPromptLibrary.SelectedIndexChanged += (s, e) => OnPromptSelected();
+        selectorPanel.Controls.Add(_cboPromptLibrary);
+
+        var btnLoad = new Button { Text = "Load", Width = 55 };
+        btnLoad.Click += (s, e) => OnPromptSelected();
+        selectorPanel.Controls.Add(btnLoad);
+
+        var btnDelete = new Button { Text = "Delete", Width = 55, ForeColor = Color.DarkRed };
+        btnDelete.Click += (s, e) => DeleteSelectedPrompt();
+        selectorPanel.Controls.Add(btnDelete);
+        layout.Controls.Add(selectorPanel);
+
+        // Prompt name
+        layout.Controls.Add(new Label { Text = "Prompt Name:", AutoSize = true, Font = new Font(Font, FontStyle.Bold) });
+        _txtPromptName = new TextBox { Dock = DockStyle.Fill, MaxLength = 100 };
+        layout.Controls.Add(_txtPromptName);
+
+        // Prompt text
         layout.Controls.Add(new Label
         {
             Text = "System prompt sent with every API call (persona / global instructions):",
@@ -258,7 +290,7 @@ public class SettingsForm : Form
             Dock = DockStyle.Fill,
             Multiline = true,
             ScrollBars = ScrollBars.Vertical,
-            Height = 200,
+            Height = 160,
             MaxLength = 10000
         };
         _txtSystemPrompt.TextChanged += (s, e) =>
@@ -271,15 +303,89 @@ public class SettingsForm : Form
         layout.Controls.Add(_lblSystemPromptCount);
 
         var btnPanel = new FlowLayoutPanel { AutoSize = true };
-        var btnSave = new Button { Text = "Save", Width = 70 };
-        btnSave.Click += (s, e) => SaveSystemPrompt();
-        var btnClear = new Button { Text = "Clear", Width = 70 };
-        btnClear.Click += (s, e) => { _txtSystemPrompt.Text = ""; SaveSystemPrompt(); };
-        btnPanel.Controls.AddRange(new Control[] { btnSave, btnClear });
+        var btnSaveAs = new Button { Text = "Save to Library", Width = 110 };
+        btnSaveAs.Click += (s, e) => SavePromptToLibrary();
+        var btnActivate = new Button { Text = "Set as Active", Width = 100 };
+        btnActivate.Click += (s, e) => SaveSystemPrompt();
+        var btnClear = new Button { Text = "Clear", Width = 55 };
+        btnClear.Click += (s, e) => { _txtSystemPrompt.Text = ""; _txtPromptName.Text = ""; };
+        btnPanel.Controls.AddRange(new Control[] { btnSaveAs, btnActivate, btnClear });
         layout.Controls.Add(btnPanel);
 
         page.Controls.Add(layout);
         return page;
+    }
+
+    private void OnPromptSelected()
+    {
+        if (_cboPromptLibrary.SelectedItem is SystemPromptEntry entry)
+        {
+            _txtPromptName.Text = entry.Name;
+            _txtSystemPrompt.Text = entry.Text;
+        }
+    }
+
+    private void SavePromptToLibrary()
+    {
+        var name = _txtPromptName.Text.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            MessageBox.Show("Enter a name for this prompt.", "Name Required", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        var existing = _prompts.FindIndex(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (existing >= 0)
+        {
+            _prompts[existing].Text = _txtSystemPrompt.Text;
+        }
+        else
+        {
+            _prompts.Add(new SystemPromptEntry(name, _txtSystemPrompt.Text));
+        }
+
+        _settings.SavePrompts(_prompts);
+        RefreshPromptList(name);
+        MessageBox.Show($"Prompt \"{name}\" saved to library.", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void DeleteSelectedPrompt()
+    {
+        if (_cboPromptLibrary.SelectedItem is not SystemPromptEntry entry) return;
+
+        var result = MessageBox.Show(
+            $"Delete \"{entry.Name}\" from the prompt library?",
+            "Delete Prompt",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+        if (result != DialogResult.Yes) return;
+
+        _prompts.RemoveAll(p => p.Name == entry.Name);
+        _settings.SavePrompts(_prompts);
+        _txtPromptName.Text = "";
+        _txtSystemPrompt.Text = "";
+        RefreshPromptList(null);
+    }
+
+    private void RefreshPromptList(string selectName)
+    {
+        _cboPromptLibrary.Items.Clear();
+        _cboPromptLibrary.Items.Add("(none)");
+        foreach (var p in _prompts)
+            _cboPromptLibrary.Items.Add(p);
+
+        if (selectName != null)
+        {
+            for (int i = 1; i < _cboPromptLibrary.Items.Count; i++)
+            {
+                if (_cboPromptLibrary.Items[i] is SystemPromptEntry e && e.Name == selectName)
+                {
+                    _cboPromptLibrary.SelectedIndex = i;
+                    return;
+                }
+            }
+        }
+        _cboPromptLibrary.SelectedIndex = 0;
     }
 
     // ── Parameters Tab ─────────────────────────────────────────────
@@ -593,8 +699,11 @@ public class SettingsForm : Form
         RefreshCacheStats();
 
         // System prompt
+        _prompts = _settings.LoadPrompts();
         _txtSystemPrompt.Text = s.SystemPrompt ?? "";
+        _txtPromptName.Text = s.ActivePromptName ?? "";
         _lblSystemPromptCount.Text = $"{_txtSystemPrompt.Text.Length} / 10,000 characters";
+        RefreshPromptList(s.ActivePromptName);
 
         // Parameters
         _trkTemperature.Value = Math.Max(0, Math.Min(200, (int)(s.Temperature * 100)));
@@ -721,8 +830,9 @@ public class SettingsForm : Form
     {
         var s = _settings.LoadSettings();
         s.SystemPrompt = _txtSystemPrompt.Text;
+        s.ActivePromptName = _txtPromptName.Text.Trim();
         _settings.SaveSettings(s);
-        MessageBox.Show("System prompt saved.", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show("System prompt set as active.", "Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private void SaveParameters()
