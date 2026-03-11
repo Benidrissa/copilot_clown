@@ -13,7 +13,7 @@ namespace CopilotClown.Services;
 
 public class OpenAIProvider : ILlmProvider
 {
-    private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+    private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
 
     public ProviderName Name => ProviderName.OpenAI;
 
