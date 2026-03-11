@@ -260,6 +260,12 @@ public class ContentExtractor
         return null;
     }
 
+    public static int GetPdfPageCount(byte[] fileBytes)
+    {
+        using (var doc = PdfDocument.Open(fileBytes))
+            return doc.NumberOfPages;
+    }
+
     private static string ReadPlainText(string filePath)
     {
         var info = new FileInfo(filePath);

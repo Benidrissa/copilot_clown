@@ -293,6 +293,12 @@ public static class UseAiFunction
                     continue;
                 }
 
+                // Anthropic limits PDFs to 100 pages — skip upload and use extracted text instead
+                if (provider == ProviderName.Anthropic
+                    && att.MimeType == "application/pdf"
+                    && ContentExtractor.GetPdfPageCount(fileBytes) > 100)
+                    continue;
+
                 var fileId = llm.UploadFileAsync(fileBytes, att.FileName, att.MimeType, apiKey)
                     .GetAwaiter().GetResult();
 
