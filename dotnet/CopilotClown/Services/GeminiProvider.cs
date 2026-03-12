@@ -12,7 +12,7 @@ namespace CopilotClown.Services;
 
 public class GeminiProvider : ILlmProvider
 {
-    private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+    private static readonly HttpClient Http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
     private const string BaseUrl = "https://generativelanguage.googleapis.com/v1beta/models/";
 
     public ProviderName Name => ProviderName.Google;

@@ -31,7 +31,7 @@ public class RibbonController : ExcelRibbon
                   imageMso='PasteValues'
                   onAction='OnConvertValuesClick'
                   screentip='Convert Selection to Values'
-                  supertip='Replace formulas in selected cells with their computed text values, so the workbook can be shared.' />
+                  supertip='Replace formulas in selected cells with their computed text values, so the workbook can be shared. Shortcut: Ctrl+Shift+V' />
           <separator id='sepRefresh' />
           <button id='btnRefreshAll'
                   label='Refresh All'
@@ -129,8 +129,8 @@ public class RibbonController : ExcelRibbon
 }
 
 /// <summary>
-/// Macro command to open settings — works even if ribbon doesn't load.
-/// Run from Excel: Alt+F8 > ShowAISettings
+/// Macro commands for AI Assistant — work even if ribbon doesn't load.
+/// Run from Excel: Alt+F8 > ShowAISettings / ConvertToValues
 /// </summary>
 public static class Commands
 {
@@ -139,5 +139,27 @@ public static class Commands
     {
         var form = new SettingsForm();
         form.ShowDialog();
+    }
+
+    [ExcelCommand(
+        MenuName = "AI Assistant",
+        MenuText = "Convert to Values",
+        ShortCut = "^+V")]
+    public static void ConvertToValues()
+    {
+        try
+        {
+            dynamic app = ExcelDnaUtil.Application;
+            dynamic selection = app.Selection;
+            selection.Value2 = selection.Value2;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Could not convert: {ex.Message}",
+                "Convert to Values",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
     }
 }
