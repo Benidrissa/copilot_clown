@@ -138,7 +138,6 @@ public class ClaudeProvider : ILlmProvider
     private static object[] BuildMultimodalContent(ResolvedPrompt prompt)
     {
         var blocks = new List<object>();
-        var cacheControl = new Dictionary<string, object> { { "type", "ephemeral" } };
 
         // Document attachments: prefer file_id, fall back to inline text
         foreach (var att in prompt.Attachments.Where(a => a.Type == AttachmentType.Text))
@@ -154,8 +153,7 @@ public class ClaudeProvider : ILlmProvider
                             { "type", "file" },
                             { "file_id", att.RemoteFileId }
                         }
-                    },
-                    { "cache_control", cacheControl }
+                    }
                 });
             }
             else
@@ -164,8 +162,7 @@ public class ClaudeProvider : ILlmProvider
                 blocks.Add(new Dictionary<string, object>
                 {
                     { "type", "text" },
-                    { "text", $"--- Content from {att.FileName} ---\n{att.Content}\n--- End ---\n" },
-                    { "cache_control", cacheControl }
+                    { "text", $"--- Content from {att.FileName} ---\n{att.Content}\n--- End ---\n" }
                 });
             }
         }
@@ -183,8 +180,7 @@ public class ClaudeProvider : ILlmProvider
                             { "type", "file" },
                             { "file_id", att.RemoteFileId }
                         }
-                    },
-                    { "cache_control", cacheControl }
+                    }
                 });
             }
             else
@@ -209,6 +205,18 @@ public class ClaudeProvider : ILlmProvider
             { "type", "text" },
             { "text", prompt.CleanText }
         });
+
+        // Anthropic allows at most 4 blocks with cache_control.
+        // Apply cache_control to the last N attachment blocks (up to 4),
+        // prioritizing the blocks closest to the user prompt for best cache hits.
+        var cacheControl = new Dictionary<string, object> { { "type", "ephemeral" } };
+        int attachmentCount = blocks.Count - 1; // exclude the final user prompt text block
+        int cacheableCount = Math.Min(attachmentCount, 4);
+        // Tag the last `cacheableCount` attachment blocks (indices: attachmentCount - cacheableCount .. attachmentCount - 1)
+        for (int i = attachmentCount - cacheableCount; i < attachmentCount; i++)
+        {
+            ((Dictionary<string, object>)blocks[i])["cache_control"] = cacheControl;
+        }
 
         return blocks.ToArray();
     }

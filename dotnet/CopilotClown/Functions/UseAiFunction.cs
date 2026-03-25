@@ -299,6 +299,10 @@ public static class UseAiFunction
                     && ContentExtractor.GetPdfPageCount(fileBytes) > 100)
                     continue;
 
+                // OpenAI Files API only accepts PDFs — images must be sent inline as base64
+                if (provider == ProviderName.OpenAI && att.Type == AttachmentType.Image)
+                    continue;
+
                 var fileId = llm.UploadFileAsync(fileBytes, att.FileName, att.MimeType, apiKey)
                     .GetAwaiter().GetResult();
 
