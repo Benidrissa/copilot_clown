@@ -299,8 +299,10 @@ public static class UseAiFunction
                     && ContentExtractor.GetPdfPageCount(fileBytes) > 100)
                     continue;
 
-                // OpenAI Files API only accepts PDFs — images must be sent inline as base64
-                if (provider == ProviderName.OpenAI && att.Type == AttachmentType.Image)
+                // OpenAI Files API only accepts PDFs — skip images and Office formats
+                // (content still sent inline: extracted text for documents, base64 for images)
+                if (provider == ProviderName.OpenAI
+                    && (att.Type == AttachmentType.Image || IsOfficeFormat(att.MimeType)))
                     continue;
 
                 var fileId = llm.UploadFileAsync(fileBytes, att.FileName, att.MimeType, apiKey)
@@ -327,6 +329,16 @@ public static class UseAiFunction
     {
         return path != null && (path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsOfficeFormat(string mimeType)
+    {
+        if (string.IsNullOrEmpty(mimeType)) return false;
+        return mimeType.StartsWith("application/vnd.openxmlformats-officedocument.", StringComparison.OrdinalIgnoreCase)
+            || mimeType.StartsWith("application/vnd.ms-", StringComparison.OrdinalIgnoreCase)
+            || mimeType == "application/msword"
+            || mimeType == "application/vnd.ms-excel"
+            || mimeType == "application/vnd.ms-powerpoint";
     }
 
     // Excel cell character limit
