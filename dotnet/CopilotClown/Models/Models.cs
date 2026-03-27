@@ -88,13 +88,13 @@ public static class ModelRegistry
     public static readonly ModelInfo[] OpenAIModels = new ModelInfo[]
     {
         // GPT-5 series
-        new ModelInfo("gpt-5.2", "GPT-5.2", ProviderName.OpenAI, 200_000, "High"),
-        new ModelInfo("gpt-5.1", "GPT-5.1", ProviderName.OpenAI, 200_000, "High"),
-        new ModelInfo("gpt-5", "GPT-5", ProviderName.OpenAI, 200_000, "High"),
-        new ModelInfo("gpt-5-mini", "GPT-5 Mini", ProviderName.OpenAI, 200_000, "Medium"),
-        new ModelInfo("gpt-5-nano", "GPT-5 Nano", ProviderName.OpenAI, 200_000, "Low"),
-        new ModelInfo("gpt-5-pro", "GPT-5 Pro", ProviderName.OpenAI, 200_000, "High"),
-        new ModelInfo("gpt-5.2-pro", "GPT-5.2 Pro", ProviderName.OpenAI, 200_000, "High"),
+        new ModelInfo("gpt-5.2", "GPT-5.2", ProviderName.OpenAI, 1_047_576, "High"),
+        new ModelInfo("gpt-5.1", "GPT-5.1", ProviderName.OpenAI, 1_047_576, "High"),
+        new ModelInfo("gpt-5", "GPT-5", ProviderName.OpenAI, 1_047_576, "High"),
+        new ModelInfo("gpt-5-mini", "GPT-5 Mini", ProviderName.OpenAI, 1_047_576, "Medium"),
+        new ModelInfo("gpt-5-nano", "GPT-5 Nano", ProviderName.OpenAI, 1_047_576, "Low"),
+        new ModelInfo("gpt-5-pro", "GPT-5 Pro", ProviderName.OpenAI, 1_047_576, "High"),
+        new ModelInfo("gpt-5.2-pro", "GPT-5.2 Pro", ProviderName.OpenAI, 1_047_576, "High"),
         // GPT-4 series
         new ModelInfo("gpt-4.1", "GPT-4.1", ProviderName.OpenAI, 1_047_576, "High"),
         new ModelInfo("gpt-4.1-mini", "GPT-4.1 Mini", ProviderName.OpenAI, 1_047_576, "Medium"),
@@ -103,8 +103,8 @@ public static class ModelRegistry
         new ModelInfo("gpt-4o-mini", "GPT-4o Mini", ProviderName.OpenAI, 128_000, "Medium"),
         new ModelInfo("gpt-4-turbo", "GPT-4 Turbo", ProviderName.OpenAI, 128_000, "High"),
         // Reasoning models
-        new ModelInfo("o4-mini", "o4-mini", ProviderName.OpenAI, 200_000, "Medium"),
-        new ModelInfo("o3", "o3", ProviderName.OpenAI, 200_000, "High"),
+        new ModelInfo("o4-mini", "o4-mini", ProviderName.OpenAI, 1_047_576, "Medium"),
+        new ModelInfo("o3", "o3", ProviderName.OpenAI, 1_047_576, "High"),
         new ModelInfo("o3-mini", "o3-mini", ProviderName.OpenAI, 200_000, "Medium"),
         new ModelInfo("o1", "o1", ProviderName.OpenAI, 200_000, "High"),
         new ModelInfo("o1-pro", "o1 Pro", ProviderName.OpenAI, 200_000, "High"),

@@ -146,10 +146,13 @@ public class OpenAIProvider : ILlmProvider
 
     private static string GetMaxTokensKey(string model)
     {
-        // GPT-5.x models expect max_completion_tokens; older models still accept max_tokens.
-        return model.StartsWith("gpt-5", StringComparison.OrdinalIgnoreCase)
-            ? "max_completion_tokens"
-            : "max_tokens";
+        // Newer models (GPT-5.x, GPT-4.1, o-series) use max_completion_tokens to unlock
+        // the full context window. Legacy max_tokens can artificially cap input size.
+        if (model.StartsWith("gpt-5", StringComparison.OrdinalIgnoreCase)
+            || model.StartsWith("gpt-4.1", StringComparison.OrdinalIgnoreCase)
+            || IsReasoningModel(model))
+            return "max_completion_tokens";
+        return "max_tokens";
     }
 
     private static bool IsReasoningModel(string model)
