@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -200,6 +201,9 @@ public static class UseAiFunction
                     if (resolved.HasAttachments)
                         UploadAttachments(llm, resolved, provider, apiKey);
 
+                    // Truncate inline text to fit within the model's context window
+                    TruncateToFit(resolved, model, settings.MaxTokens);
+
                     var result = llm.CompleteAsync(resolved, apiKey, model, settings, ct: CancellationToken.None)
                         .GetAwaiter().GetResult();
 
@@ -329,6 +333,53 @@ public static class UseAiFunction
     {
         return path != null && (path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
             || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Estimate total tokens and truncate text attachments (longest first) to fit
+    /// within the model's context window. Uses ~4 chars/token as a conservative estimate.
+    /// Attachments with a RemoteFileId are not truncated (content handled server-side).
+    /// </summary>
+    private static void TruncateToFit(ResolvedPrompt resolved, string modelId, int maxOutputTokens)
+    {
+        var modelInfo = ModelRegistry.AllModels.FirstOrDefault(
+            m => m.Id.Equals(modelId, StringComparison.OrdinalIgnoreCase));
+        if (modelInfo == null) return;
+
+        const int charsPerToken = 4;
+        int maxInputTokens = modelInfo.ContextWindow - maxOutputTokens;
+        // Reserve 5% buffer for message framing, system prompt, etc.
+        int tokenBudget = (int)(maxInputTokens * 0.95);
+
+        int EstimateTokens()
+        {
+            int total = resolved.CleanText.Length / charsPerToken;
+            foreach (var att in resolved.Attachments)
+            {
+                if (att.Type == AttachmentType.Text && string.IsNullOrEmpty(att.RemoteFileId))
+                    total += att.Content.Length / charsPerToken;
+            }
+            return total;
+        }
+
+        var estimated = EstimateTokens();
+        if (estimated <= tokenBudget) return;
+
+        // Sort text attachments by content length descending, truncate largest first
+        var textAtts = resolved.Attachments
+            .Where(a => a.Type == AttachmentType.Text && string.IsNullOrEmpty(a.RemoteFileId))
+            .OrderByDescending(a => a.Content.Length)
+            .ToList();
+
+        foreach (var att in textAtts)
+        {
+            if (EstimateTokens() <= tokenBudget) break;
+
+            int excess = EstimateTokens() - tokenBudget;
+            int charsToRemove = excess * charsPerToken;
+            int newLen = Math.Max(att.Content.Length - charsToRemove, att.Content.Length / 4);
+            att.Content = att.Content.Substring(0, newLen) + "\n\n[... content truncated to fit context window ...]";
+        }
     }
 
     private static bool IsOfficeFormat(string mimeType)

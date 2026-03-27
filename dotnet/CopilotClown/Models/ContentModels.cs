@@ -11,7 +11,7 @@ public enum AttachmentType
 public class Attachment
 {
     public AttachmentType Type { get; }
-    public string Content { get; }      // Text: extracted text. Image: base64-encoded data.
+    public string Content { get; set; } // Text: extracted text. Image: base64-encoded data.
     public string MimeType { get; }     // e.g. "image/png", "application/pdf"
     public string SourcePath { get; }   // Original file path or URL
     public string FileName { get; }     // Just the filename

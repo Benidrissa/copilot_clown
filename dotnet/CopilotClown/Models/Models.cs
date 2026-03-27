@@ -87,14 +87,14 @@ public static class ModelRegistry
 
     public static readonly ModelInfo[] OpenAIModels = new ModelInfo[]
     {
-        // GPT-5 series
-        new ModelInfo("gpt-5.2", "GPT-5.2", ProviderName.OpenAI, 1_047_576, "High"),
-        new ModelInfo("gpt-5.1", "GPT-5.1", ProviderName.OpenAI, 1_047_576, "High"),
-        new ModelInfo("gpt-5", "GPT-5", ProviderName.OpenAI, 1_047_576, "High"),
-        new ModelInfo("gpt-5-mini", "GPT-5 Mini", ProviderName.OpenAI, 1_047_576, "Medium"),
-        new ModelInfo("gpt-5-nano", "GPT-5 Nano", ProviderName.OpenAI, 1_047_576, "Low"),
-        new ModelInfo("gpt-5-pro", "GPT-5 Pro", ProviderName.OpenAI, 1_047_576, "High"),
-        new ModelInfo("gpt-5.2-pro", "GPT-5.2 Pro", ProviderName.OpenAI, 1_047_576, "High"),
+        // GPT-5 series (280K total context: 272K input + 8K output)
+        new ModelInfo("gpt-5.2", "GPT-5.2", ProviderName.OpenAI, 280_000, "High"),
+        new ModelInfo("gpt-5.1", "GPT-5.1", ProviderName.OpenAI, 280_000, "High"),
+        new ModelInfo("gpt-5", "GPT-5", ProviderName.OpenAI, 280_000, "High"),
+        new ModelInfo("gpt-5-mini", "GPT-5 Mini", ProviderName.OpenAI, 280_000, "Medium"),
+        new ModelInfo("gpt-5-nano", "GPT-5 Nano", ProviderName.OpenAI, 280_000, "Low"),
+        new ModelInfo("gpt-5-pro", "GPT-5 Pro", ProviderName.OpenAI, 280_000, "High"),
+        new ModelInfo("gpt-5.2-pro", "GPT-5.2 Pro", ProviderName.OpenAI, 280_000, "High"),
         // GPT-4 series
         new ModelInfo("gpt-4.1", "GPT-4.1", ProviderName.OpenAI, 1_047_576, "High"),
         new ModelInfo("gpt-4.1-mini", "GPT-4.1 Mini", ProviderName.OpenAI, 1_047_576, "Medium"),
