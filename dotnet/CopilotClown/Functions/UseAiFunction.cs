@@ -301,14 +301,16 @@ public static class UseAiFunction
                     continue;
                 }
 
-                // Images: upload to Files API for provider-side processing
+                // Images: OpenAI uses input_image (base64), others use Files API
                 if (att.Type == AttachmentType.Image)
                 {
+                    if (provider == ProviderName.OpenAI)
+                        continue; // OpenAI doesn't support images as input_file — use input_image inline
                     var imgBytes = att.RawBytes ?? Convert.FromBase64String(att.Content);
                     var imgFileId = TryUpload(llm, imgBytes, att.FileName, att.MimeType, apiKey);
                     if (imgFileId != null)
                         CacheFileId(att, provider, imgFileId);
-                    continue; // Falls back to inline base64 if upload fails
+                    continue;
                 }
 
                 // ── Tier 1: Upload original file ──
