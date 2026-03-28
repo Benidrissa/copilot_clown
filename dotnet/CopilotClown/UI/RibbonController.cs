@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using ExcelDna.Integration;
@@ -6,6 +7,20 @@ using ExcelDna.Integration.CustomUI;
 using CopilotClown.Functions;
 
 namespace CopilotClown.UI;
+
+/// <summary>
+/// Stores formulas before Convert to Values so they can be restored (undo).
+/// Only the last conversion is kept.
+/// </summary>
+internal static class ConvertUndoState
+{
+    // Key: "SheetName!A1" → formula string
+    internal static Dictionary<string, string> SavedFormulas = new Dictionary<string, string>();
+
+    internal static void Clear() => SavedFormulas.Clear();
+
+    internal static bool HasUndo => SavedFormulas.Count > 0;
+}
 
 [ComVisible(true)]
 public class RibbonController : ExcelRibbon
@@ -31,7 +46,14 @@ public class RibbonController : ExcelRibbon
                   imageMso='PasteValues'
                   onAction='OnConvertValuesClick'
                   screentip='Convert Selection to Values'
-                  supertip='Replace formulas in selected cells with their computed text values, so the workbook can be shared. Shortcut: Ctrl+Shift+V' />
+                  supertip='Replace formulas in selected cells with their computed text values, so the workbook can be shared. Use Undo Convert to restore. Shortcut: Ctrl+Shift+V' />
+          <button id='btnUndoConvert'
+                  label='Undo Convert'
+                  size='large'
+                  imageMso='Undo'
+                  onAction='OnUndoConvertClick'
+                  screentip='Undo Convert to Values'
+                  supertip='Restore the USEAI formulas that were replaced by the last Convert to Values operation.' />
           <separator id='sepRefresh' />
           <button id='btnRefreshAll'
                   label='Refresh All'
@@ -66,6 +88,24 @@ public class RibbonController : ExcelRibbon
         {
             dynamic app = ExcelDnaUtil.Application;
             dynamic selection = app.Selection;
+
+            // Save formulas for undo before converting
+            ConvertUndoState.Clear();
+            foreach (dynamic cell in selection.Cells)
+            {
+                try
+                {
+                    if (cell.HasFormula)
+                    {
+                        string sheetName = cell.Worksheet.Name;
+                        string address = cell.Address;
+                        string formula = cell.Formula;
+                        ConvertUndoState.SavedFormulas[$"{sheetName}!{address}"] = formula;
+                    }
+                }
+                catch { }
+            }
+
             selection.Value2 = selection.Value2;
         }
         catch (Exception ex)
@@ -73,6 +113,59 @@ public class RibbonController : ExcelRibbon
             MessageBox.Show(
                 $"Could not convert: {ex.Message}",
                 "Convert to Values",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        }
+    }
+
+    public void OnUndoConvertClick(IRibbonControl control)
+    {
+        if (!ConvertUndoState.HasUndo)
+        {
+            MessageBox.Show(
+                "Nothing to undo. Convert to Values has not been used yet.",
+                "Undo Convert",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        try
+        {
+            dynamic app = ExcelDnaUtil.Application;
+            dynamic workbook = app.ActiveWorkbook;
+            int restored = 0;
+
+            foreach (var kvp in ConvertUndoState.SavedFormulas)
+            {
+                try
+                {
+                    // Key format: "SheetName!$A$1"
+                    int sep = kvp.Key.IndexOf('!');
+                    string sheetName = kvp.Key.Substring(0, sep);
+                    string address = kvp.Key.Substring(sep + 1);
+
+                    dynamic sheet = workbook.Worksheets[sheetName];
+                    dynamic cell = sheet.Range[address];
+                    cell.Formula = kvp.Value;
+                    restored++;
+                }
+                catch { }
+            }
+
+            ConvertUndoState.Clear();
+
+            MessageBox.Show(
+                $"Restored {restored} formula(s).",
+                "Undo Convert",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Undo failed: {ex.Message}",
+                "Undo Convert",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
         }
@@ -151,6 +244,24 @@ public static class Commands
         {
             dynamic app = ExcelDnaUtil.Application;
             dynamic selection = app.Selection;
+
+            // Save formulas for undo
+            ConvertUndoState.Clear();
+            foreach (dynamic cell in selection.Cells)
+            {
+                try
+                {
+                    if (cell.HasFormula)
+                    {
+                        string sheetName = cell.Worksheet.Name;
+                        string address = cell.Address;
+                        string formula = cell.Formula;
+                        ConvertUndoState.SavedFormulas[$"{sheetName}!{address}"] = formula;
+                    }
+                }
+                catch { }
+            }
+
             selection.Value2 = selection.Value2;
         }
         catch (Exception ex)

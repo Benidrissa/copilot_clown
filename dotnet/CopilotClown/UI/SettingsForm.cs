@@ -522,9 +522,28 @@ public class SettingsForm : Form
         {
             dynamic app = ExcelDnaUtil.Application;
             dynamic selection = app.Selection;
+
+            // Save formulas for undo
+            ConvertUndoState.Clear();
+            foreach (dynamic cell in selection.Cells)
+            {
+                try
+                {
+                    if (cell.HasFormula)
+                    {
+                        string sheetName = cell.Worksheet.Name;
+                        string address = cell.Address;
+                        string formula = cell.Formula;
+                        ConvertUndoState.SavedFormulas[$"{sheetName}!{address}"] = formula;
+                    }
+                }
+                catch { }
+            }
+
             selection.Value2 = selection.Value2;
 
-            _lblToolsStatus.Text = "Selected cells converted to values.";
+            int count = ConvertUndoState.SavedFormulas.Count;
+            _lblToolsStatus.Text = $"Converted {count} cell(s) to values. Use 'Undo Convert' in the ribbon to restore.";
             _lblToolsStatus.ForeColor = Color.Green;
         }
         catch (Exception ex)
@@ -548,6 +567,8 @@ public class SettingsForm : Form
                 return;
             }
 
+            // Save formulas for undo
+            ConvertUndoState.Clear();
             int convertedCount = 0;
 
             foreach (dynamic sheet in workbook.Worksheets)
@@ -566,6 +587,10 @@ public class SettingsForm : Form
                                 string formula = cell.Formula?.ToString() ?? "";
                                 if (formula.IndexOf("USEAI", StringComparison.OrdinalIgnoreCase) >= 0)
                                 {
+                                    string sheetName = cell.Worksheet.Name;
+                                    string address = cell.Address;
+                                    ConvertUndoState.SavedFormulas[$"{sheetName}!{address}"] = formula;
+
                                     cell.Value2 = cell.Value2;
                                     convertedCount++;
                                 }
@@ -577,7 +602,7 @@ public class SettingsForm : Form
                 catch { }
             }
 
-            _lblToolsStatus.Text = $"Converted {convertedCount} USEAI cell{(convertedCount == 1 ? "" : "s")} to values.";
+            _lblToolsStatus.Text = $"Converted {convertedCount} USEAI cell{(convertedCount == 1 ? "" : "s")} to values. Use 'Undo Convert' in the ribbon to restore.";
             _lblToolsStatus.ForeColor = Color.Green;
         }
         catch (Exception ex)
