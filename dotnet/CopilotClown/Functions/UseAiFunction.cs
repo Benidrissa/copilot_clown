@@ -301,16 +301,14 @@ public static class UseAiFunction
                     continue;
                 }
 
-                // Images: upload directly (Anthropic) or skip for inline base64 (OpenAI)
+                // Images: upload to Files API for provider-side processing
                 if (att.Type == AttachmentType.Image)
                 {
-                    if (provider == ProviderName.OpenAI)
-                        continue; // OpenAI Files API doesn't accept images
                     var imgBytes = att.RawBytes ?? Convert.FromBase64String(att.Content);
                     var imgFileId = TryUpload(llm, imgBytes, att.FileName, att.MimeType, apiKey);
                     if (imgFileId != null)
                         CacheFileId(att, provider, imgFileId);
-                    continue;
+                    continue; // Falls back to inline base64 if upload fails
                 }
 
                 // ── Tier 1: Upload original file ──
@@ -324,9 +322,7 @@ public static class UseAiFunction
                         skipOriginal = true;
                 }
 
-                // OpenAI Files API only accepts PDFs
-                if (provider == ProviderName.OpenAI && att.MimeType != "application/pdf")
-                    skipOriginal = true;
+
 
                 if (!skipOriginal)
                 {
@@ -345,8 +341,7 @@ public static class UseAiFunction
                 }
 
                 // ── Tier 2: Extract text → .txt file → upload ──
-                // (OpenAI Files API only accepts PDFs, so skip Tier 2 for OpenAI)
-                if (provider != ProviderName.OpenAI && !string.IsNullOrEmpty(att.Content))
+                if (!string.IsNullOrEmpty(att.Content))
                 {
                     var txtBytes = Encoding.UTF8.GetBytes(att.Content);
                     var txtFileName = System.IO.Path.GetFileNameWithoutExtension(att.FileName) + ".txt";
@@ -399,15 +394,6 @@ public static class UseAiFunction
             || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool IsOfficeFormat(string mimeType)
-    {
-        if (string.IsNullOrEmpty(mimeType)) return false;
-        return mimeType.StartsWith("application/vnd.openxmlformats-officedocument.", StringComparison.OrdinalIgnoreCase)
-            || mimeType.StartsWith("application/vnd.ms-", StringComparison.OrdinalIgnoreCase)
-            || mimeType == "application/msword"
-            || mimeType == "application/vnd.ms-excel"
-            || mimeType == "application/vnd.ms-powerpoint";
-    }
 
     // Excel cell character limit
     private const int CellMaxChars = 32767;

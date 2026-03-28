@@ -166,23 +166,39 @@ public class OpenAIProvider : ILlmProvider
     {
         var blocks = new List<object>();
 
-        // Document/text attachments: prefer file_id, fall back to inline text
+        // Document/text attachments: file_id → base64 input_file → inline text
         foreach (var att in prompt.Attachments.Where(a => a.Type == AttachmentType.Text))
         {
             if (!string.IsNullOrEmpty(att.RemoteFileId))
             {
+                // Tier 1/2: uploaded file reference
                 blocks.Add(new Dictionary<string, object>
                 {
-                    { "type", "file" },
-                    { "file", new Dictionary<string, object>
+                    { "type", "input_file" },
+                    { "input_file", new Dictionary<string, object>
                         {
                             { "file_id", att.RemoteFileId }
                         }
                     }
                 });
             }
+            else if (att.RawBytes != null && att.RawBytes.Length <= 50 * 1024 * 1024)
+            {
+                // Base64 input_file (no upload needed, supports all file types)
+                blocks.Add(new Dictionary<string, object>
+                {
+                    { "type", "input_file" },
+                    { "input_file", new Dictionary<string, object>
+                        {
+                            { "filename", att.FileName },
+                            { "file_data", $"data:{att.MimeType};base64,{Convert.ToBase64String(att.RawBytes)}" }
+                        }
+                    }
+                });
+            }
             else
             {
+                // Inline text fallback
                 blocks.Add(new Dictionary<string, object>
                 {
                     { "type", "text" },
@@ -191,15 +207,15 @@ public class OpenAIProvider : ILlmProvider
             }
         }
 
-        // Image attachments: prefer file_id, fall back to base64 data URI
+        // Image attachments: file_id → base64 image_url
         foreach (var att in prompt.Attachments.Where(a => a.Type == AttachmentType.Image))
         {
             if (!string.IsNullOrEmpty(att.RemoteFileId))
             {
                 blocks.Add(new Dictionary<string, object>
                 {
-                    { "type", "file" },
-                    { "file", new Dictionary<string, object>
+                    { "type", "input_file" },
+                    { "input_file", new Dictionary<string, object>
                         {
                             { "file_id", att.RemoteFileId }
                         }
