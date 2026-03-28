@@ -207,7 +207,7 @@ public static class UseAiFunction
                         result = llm.CompleteAsync(resolved, apiKey, model, settings, ct: CancellationToken.None)
                             .GetAwaiter().GetResult();
                     }
-                    catch (ApiException ex) when (ex.StatusCode == 404 && ex.Message.Contains("not found"))
+                    catch (ApiException ex) when (ex.StatusCode == 404)
                     {
                         // File IDs expired on the provider side — evict stale IDs
                         // from cache, re-upload, then retry the API call.

@@ -126,7 +126,7 @@ public class ClaudeProvider : ILlmProvider
     {
         try
         {
-            await CompleteAsync("hi", apiKey, "claude-haiku-3-5-20241022", maxTokens: 1, ct: ct);
+            await CompleteAsync("hi", apiKey, "claude-3-haiku-20240307", maxTokens: 1, ct: ct);
             return true;
         }
         catch

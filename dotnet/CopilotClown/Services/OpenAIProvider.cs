@@ -172,9 +172,13 @@ public class OpenAIProvider : ILlmProvider
             if (!string.IsNullOrEmpty(contentText))
                 return contentText;
         }
-        // Fallback: try output_text at top level or single output text
-        var fallback = JsonHelper.GetString(root, "output.0.text");
-        return fallback ?? "";
+
+        // Fallback: try concatenating all content blocks
+        var text = JsonHelper.GetString(root, "output.0.content.0.text");
+        if (!string.IsNullOrEmpty(text))
+            return text;
+
+        throw new ApiException("OpenAI returned a response but no text could be extracted. Check the model and prompt.", 0);
     }
 
     private static object[] BuildMultimodalContent(ResolvedPrompt prompt)
