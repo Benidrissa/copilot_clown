@@ -345,7 +345,8 @@ public static class UseAiFunction
                 }
 
                 // ── Tier 2: Extract text → .txt file → upload ──
-                if (!string.IsNullOrEmpty(att.Content))
+                // (OpenAI Files API only accepts PDFs, so skip Tier 2 for OpenAI)
+                if (provider != ProviderName.OpenAI && !string.IsNullOrEmpty(att.Content))
                 {
                     var txtBytes = Encoding.UTF8.GetBytes(att.Content);
                     var txtFileName = System.IO.Path.GetFileNameWithoutExtension(att.FileName) + ".txt";
