@@ -283,85 +283,84 @@ public static class UseAiFunction
     ///   1. Upload original file (native provider processing)
     ///   2. Extract text → save as .txt → upload that (full content, API file reference)
     ///   3. Inline extracted text (last resort, sent in request body)
+    /// Throws if any attachment has no content at all — audit requires 100% coverage.
     /// </summary>
     private static void UploadAttachments(ILlmProvider llm, ResolvedPrompt resolved, ProviderName provider, string apiKey, string modelId, int maxOutputTokens)
     {
         foreach (var att in resolved.Attachments)
         {
-            try
+            // Check if already uploaded
+            var cachedFileId = IsUrl(att.SourcePath)
+                ? UploadCache.GetUrl(provider, att.SourcePath)
+                : UploadCache.Get(provider, att.SourcePath);
+
+            if (cachedFileId != null)
             {
-                // Check if already uploaded
-                var cachedFileId = IsUrl(att.SourcePath)
-                    ? UploadCache.GetUrl(provider, att.SourcePath)
-                    : UploadCache.Get(provider, att.SourcePath);
+                att.RemoteFileId = cachedFileId;
+                continue;
+            }
 
-                if (cachedFileId != null)
+            // Images: OpenAI uses input_image (base64), others use Files API
+            if (att.Type == AttachmentType.Image)
+            {
+                if (string.IsNullOrEmpty(att.Content))
+                    throw new Exception($"Failed to read image: {att.FileName}");
+
+                if (provider == ProviderName.OpenAI)
+                    continue; // Sent as input_image with base64 att.Content
+
+                var imgBytes = att.RawBytes ?? Convert.FromBase64String(att.Content);
+                var imgFileId = TryUpload(llm, imgBytes, att.FileName, att.MimeType, apiKey);
+                if (imgFileId != null)
+                    CacheFileId(att, provider, imgFileId);
+                // If upload fails, provider uses base64 att.Content inline
+                continue;
+            }
+
+            // ── Tier 1: Upload original file ──
+            bool skipOriginal = false;
+
+            // Anthropic limits PDFs to 100 pages
+            if (provider == ProviderName.Anthropic && att.MimeType == "application/pdf")
+            {
+                byte[] pdfBytes = att.RawBytes ?? (System.IO.File.Exists(att.SourcePath) ? System.IO.File.ReadAllBytes(att.SourcePath) : null);
+                if (pdfBytes != null && ContentExtractor.GetPdfPageCount(pdfBytes) > 100)
+                    skipOriginal = true;
+            }
+
+            if (!skipOriginal)
+            {
+                byte[] fileBytes = att.RawBytes
+                    ?? (System.IO.File.Exists(att.SourcePath) ? System.IO.File.ReadAllBytes(att.SourcePath) : null);
+
+                if (fileBytes != null)
                 {
-                    att.RemoteFileId = cachedFileId;
-                    continue;
-                }
-
-                // Images: OpenAI uses input_image (base64), others use Files API
-                if (att.Type == AttachmentType.Image)
-                {
-                    if (provider == ProviderName.OpenAI)
-                        continue; // OpenAI doesn't support images as input_file — use input_image inline
-                    var imgBytes = att.RawBytes ?? Convert.FromBase64String(att.Content);
-                    var imgFileId = TryUpload(llm, imgBytes, att.FileName, att.MimeType, apiKey);
-                    if (imgFileId != null)
-                        CacheFileId(att, provider, imgFileId);
-                    continue;
-                }
-
-                // ── Tier 1: Upload original file ──
-                bool skipOriginal = false;
-
-                // Anthropic limits PDFs to 100 pages
-                if (provider == ProviderName.Anthropic && att.MimeType == "application/pdf")
-                {
-                    byte[] pdfBytes = att.RawBytes ?? (System.IO.File.Exists(att.SourcePath) ? System.IO.File.ReadAllBytes(att.SourcePath) : null);
-                    if (pdfBytes != null && ContentExtractor.GetPdfPageCount(pdfBytes) > 100)
-                        skipOriginal = true;
-                }
-
-
-
-                if (!skipOriginal)
-                {
-                    byte[] fileBytes = att.RawBytes
-                        ?? (System.IO.File.Exists(att.SourcePath) ? System.IO.File.ReadAllBytes(att.SourcePath) : null);
-
-                    if (fileBytes != null)
+                    var fileId = TryUpload(llm, fileBytes, att.FileName, att.MimeType, apiKey);
+                    if (fileId != null)
                     {
-                        var fileId = TryUpload(llm, fileBytes, att.FileName, att.MimeType, apiKey);
-                        if (fileId != null)
-                        {
-                            CacheFileId(att, provider, fileId);
-                            continue; // Tier 1 succeeded
-                        }
+                        CacheFileId(att, provider, fileId);
+                        continue; // Tier 1 succeeded
                     }
                 }
-
-                // ── Tier 2: Extract text → .txt file → upload ──
-                if (!string.IsNullOrEmpty(att.Content))
-                {
-                    var txtBytes = Encoding.UTF8.GetBytes(att.Content);
-                    var txtFileName = System.IO.Path.GetFileNameWithoutExtension(att.FileName) + ".txt";
-                    var txtFileId = TryUpload(llm, txtBytes, txtFileName, "text/plain", apiKey);
-                    if (txtFileId != null)
-                    {
-                        CacheFileId(att, provider, txtFileId);
-                        continue; // Tier 2 succeeded
-                    }
-                }
-
-                // ── Tier 3: Inline extracted text (no upload, content sent in request body) ──
-                // RemoteFileId stays null — provider will use att.Content inline
             }
-            catch
+
+            // ── Tier 2: Extract text → .txt file → upload ──
+            if (!string.IsNullOrEmpty(att.Content))
             {
-                // All tiers failed — provider will use inline content as fallback
+                var txtBytes = Encoding.UTF8.GetBytes(att.Content);
+                var txtFileName = System.IO.Path.GetFileNameWithoutExtension(att.FileName) + ".txt";
+                var txtFileId = TryUpload(llm, txtBytes, txtFileName, "text/plain", apiKey);
+                if (txtFileId != null)
+                {
+                    CacheFileId(att, provider, txtFileId);
+                    continue; // Tier 2 succeeded
+                }
+                // Tier 2 upload failed — Tier 3 inline will use att.Content
+                continue;
             }
+
+            // No file_id and no extracted content — content would be lost
+            throw new Exception($"Could not extract or upload content from: {att.FileName}. File content is required for audit.");
         }
     }
 
