@@ -674,31 +674,50 @@ public static class UseAiFunction
             dynamic sel = app.Selection;
             if (sel == null) return (0, 0);
 
-            int count = 0;
+            // Collect USEAI formula cells. For spill arrays, the selected cell
+            // may be a spill result — trace back to the origin cell via SpillParent.
+            var formulaCells = new System.Collections.Generic.HashSet<string>();
             foreach (dynamic cell in sel.Cells)
             {
                 try
                 {
-                    string formula = cell.Formula;
-                    if (formula != null &&
-                        (formula.IndexOf("USEAI", StringComparison.OrdinalIgnoreCase) >= 0))
+                    dynamic target = cell;
+
+                    // If this cell is part of a spill range, get the origin cell
+                    try
                     {
-                        count++;
+                        dynamic parent = cell.SpillParent;
+                        if (parent != null) target = parent;
+                    }
+                    catch { } // SpillParent not available in older Excel versions
+
+                    string formula = target.Formula;
+                    if (formula != null &&
+                        formula.IndexOf("USEAI", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        string addr = target.Address;
+                        formulaCells.Add(addr);
                     }
                 }
                 catch { }
             }
 
-            if (count == 0) return (0, 0);
+            if (formulaCells.Count == 0) return (0, 0);
 
-            // Clear memory cache (disk/workbook entries for these keys can't be
-            // individually targeted without re-parsing formulas, so clear all)
+            // Clear all cache layers so formulas re-call the API
             Cache.Clear();
+            WorkbookCache.Clear();
+            Disk.Clear();
 
-            // Dirty only the selected cells to trigger recalculation
-            try { sel.Dirty(); } catch { }
+            // Dirty the selection and force recalculation
+            try
+            {
+                sel.Dirty();
+                app.Calculate();
+            }
+            catch { }
 
-            return (count, 0);
+            return (formulaCells.Count, 0);
         }
         catch { return (0, 0); }
     }
