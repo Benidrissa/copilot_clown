@@ -279,11 +279,10 @@ public static class UseAiFunction
     }
 
     /// <summary>
-    /// Upload attachments to the provider's Files API if not already cached.
-    /// Sets RemoteFileId on each attachment so providers use file_id references.
-    /// Always uploads when possible — provider-side file processing preserves
-    /// full document content for audit. Falls back to inline extracted text
-    /// only when upload isn't supported (e.g., Office formats on OpenAI).
+    /// Upload attachments to the provider's Files API with 3-tier fallback:
+    ///   1. Upload original file (native provider processing)
+    ///   2. Extract text → save as .txt → upload that (full content, API file reference)
+    ///   3. Inline extracted text (last resort, sent in request body)
     /// </summary>
     private static void UploadAttachments(ILlmProvider llm, ResolvedPrompt resolved, ProviderName provider, string apiKey, string modelId, int maxOutputTokens)
     {
@@ -302,56 +301,95 @@ public static class UseAiFunction
                     continue;
                 }
 
-                // Get raw bytes for upload
-                byte[] fileBytes;
-                if (att.RawBytes != null)
+                // Images: upload directly (Anthropic) or skip for inline base64 (OpenAI)
+                if (att.Type == AttachmentType.Image)
                 {
-                    fileBytes = att.RawBytes;
-                }
-                else if (att.Type == AttachmentType.Image)
-                {
-                    fileBytes = Convert.FromBase64String(att.Content);
-                }
-                else if (System.IO.File.Exists(att.SourcePath))
-                {
-                    fileBytes = System.IO.File.ReadAllBytes(att.SourcePath);
-                }
-                else
-                {
-                    // Can't upload without raw bytes — use inline fallback
+                    if (provider == ProviderName.OpenAI)
+                        continue; // OpenAI Files API doesn't accept images
+                    var imgBytes = att.RawBytes ?? Convert.FromBase64String(att.Content);
+                    var imgFileId = TryUpload(llm, imgBytes, att.FileName, att.MimeType, apiKey);
+                    if (imgFileId != null)
+                        CacheFileId(att, provider, imgFileId);
                     continue;
                 }
 
-                // Anthropic limits PDFs to 100 pages — skip upload and use extracted text instead
-                if (provider == ProviderName.Anthropic
-                    && att.MimeType == "application/pdf"
-                    && ContentExtractor.GetPdfPageCount(fileBytes) > 100)
-                    continue;
+                // ── Tier 1: Upload original file ──
+                bool skipOriginal = false;
 
-                // OpenAI Files API only accepts PDFs — skip images and Office formats
-                // (content still sent inline: extracted text for documents, base64 for images)
-                if (provider == ProviderName.OpenAI
-                    && (att.Type == AttachmentType.Image || IsOfficeFormat(att.MimeType)))
-                    continue;
-
-                var fileId = llm.UploadFileAsync(fileBytes, att.FileName, att.MimeType, apiKey)
-                    .GetAwaiter().GetResult();
-
-                if (!string.IsNullOrEmpty(fileId))
+                // Anthropic limits PDFs to 100 pages
+                if (provider == ProviderName.Anthropic && att.MimeType == "application/pdf")
                 {
-                    att.RemoteFileId = fileId;
-
-                    if (IsUrl(att.SourcePath))
-                        UploadCache.SetUrl(provider, att.SourcePath, fileId);
-                    else
-                        UploadCache.Set(provider, att.SourcePath, fileId);
+                    byte[] pdfBytes = att.RawBytes ?? (System.IO.File.Exists(att.SourcePath) ? System.IO.File.ReadAllBytes(att.SourcePath) : null);
+                    if (pdfBytes != null && ContentExtractor.GetPdfPageCount(pdfBytes) > 100)
+                        skipOriginal = true;
                 }
+
+                // OpenAI Files API only accepts PDFs
+                if (provider == ProviderName.OpenAI && att.MimeType != "application/pdf")
+                    skipOriginal = true;
+
+                if (!skipOriginal)
+                {
+                    byte[] fileBytes = att.RawBytes
+                        ?? (System.IO.File.Exists(att.SourcePath) ? System.IO.File.ReadAllBytes(att.SourcePath) : null);
+
+                    if (fileBytes != null)
+                    {
+                        var fileId = TryUpload(llm, fileBytes, att.FileName, att.MimeType, apiKey);
+                        if (fileId != null)
+                        {
+                            CacheFileId(att, provider, fileId);
+                            continue; // Tier 1 succeeded
+                        }
+                    }
+                }
+
+                // ── Tier 2: Extract text → .txt file → upload ──
+                if (!string.IsNullOrEmpty(att.Content))
+                {
+                    var txtBytes = Encoding.UTF8.GetBytes(att.Content);
+                    var txtFileName = System.IO.Path.GetFileNameWithoutExtension(att.FileName) + ".txt";
+                    var txtFileId = TryUpload(llm, txtBytes, txtFileName, "text/plain", apiKey);
+                    if (txtFileId != null)
+                    {
+                        CacheFileId(att, provider, txtFileId);
+                        continue; // Tier 2 succeeded
+                    }
+                }
+
+                // ── Tier 3: Inline extracted text (no upload, content sent in request body) ──
+                // RemoteFileId stays null — provider will use att.Content inline
             }
             catch
             {
-                // Upload failed — provider will use inline content as fallback
+                // All tiers failed — provider will use inline content as fallback
             }
         }
+    }
+
+    /// <summary>Try uploading bytes to the provider. Returns file_id or null on failure.</summary>
+    private static string TryUpload(ILlmProvider llm, byte[] bytes, string fileName, string mimeType, string apiKey)
+    {
+        try
+        {
+            var fileId = llm.UploadFileAsync(bytes, fileName, mimeType, apiKey)
+                .GetAwaiter().GetResult();
+            return string.IsNullOrEmpty(fileId) ? null : fileId;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Set RemoteFileId and cache it for future calls.</summary>
+    private static void CacheFileId(Attachment att, ProviderName provider, string fileId)
+    {
+        att.RemoteFileId = fileId;
+        if (IsUrl(att.SourcePath))
+            UploadCache.SetUrl(provider, att.SourcePath, fileId);
+        else
+            UploadCache.Set(provider, att.SourcePath, fileId);
     }
 
     private static bool IsUrl(string path)
