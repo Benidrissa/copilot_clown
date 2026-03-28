@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Concurrent;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -282,42 +281,16 @@ public static class UseAiFunction
     /// <summary>
     /// Upload attachments to the provider's Files API if not already cached.
     /// Sets RemoteFileId on each attachment so providers use file_id references.
-    /// When the estimated inline token count fits within the model's context window,
-    /// skips file uploads entirely — inline extracted text is more token-efficient
-    /// than raw files processed server-side, preserving full content for audit.
-    /// Falls back silently to inline content on upload failure.
+    /// Always uploads when possible — provider-side file processing preserves
+    /// full document content for audit. Falls back to inline extracted text
+    /// only when upload isn't supported (e.g., Office formats on OpenAI).
     /// </summary>
     private static void UploadAttachments(ILlmProvider llm, ResolvedPrompt resolved, ProviderName provider, string apiKey, string modelId, int maxOutputTokens)
     {
-        // Estimate inline token count (~4 chars per token).
-        // If it fits in context, skip all file uploads — inline text uses fewer tokens
-        // than raw files tokenized server-side, so we preserve more content.
-        const int charsPerToken = 4;
-        var modelInfo = ModelRegistry.AllModels.FirstOrDefault(
-            m => m.Id.Equals(modelId, StringComparison.OrdinalIgnoreCase));
-        int contextWindow = modelInfo?.ContextWindow ?? 200_000;
-        int maxInputTokens = (int)((contextWindow - maxOutputTokens) * 0.95); // 5% buffer for framing
-
-        int inlineTokenEstimate = resolved.CleanText.Length / charsPerToken;
-        foreach (var att in resolved.Attachments)
-        {
-            if (att.Type == AttachmentType.Text)
-                inlineTokenEstimate += att.Content.Length / charsPerToken;
-            else if (att.Type == AttachmentType.Image)
-                inlineTokenEstimate += 1000; // rough estimate for base64 image tokens
-        }
-
-        bool useInlineMode = inlineTokenEstimate <= maxInputTokens;
-
         foreach (var att in resolved.Attachments)
         {
             try
             {
-                // If inline text fits in context, skip file uploads entirely —
-                // extracted text is more compact than raw file tokenization
-                if (useInlineMode && att.Type == AttachmentType.Text)
-                    continue;
-
                 // Check if already uploaded
                 var cachedFileId = IsUrl(att.SourcePath)
                     ? UploadCache.GetUrl(provider, att.SourcePath)
