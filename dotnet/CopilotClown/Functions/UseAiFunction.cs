@@ -210,8 +210,8 @@ public static class UseAiFunction
                     }
                     catch (ApiException ex) when (ex.StatusCode == 404 && ex.Message.Contains("not found"))
                     {
-                        // File IDs expired on the provider side — evict from cache,
-                        // clear RemoteFileId so providers fall back to inline content, and retry.
+                        // File IDs expired on the provider side — evict stale IDs
+                        // from cache, re-upload, then retry the API call.
                         foreach (var att in resolved.Attachments)
                         {
                             if (!string.IsNullOrEmpty(att.RemoteFileId))
@@ -223,6 +223,10 @@ public static class UseAiFunction
                                 att.RemoteFileId = null;
                             }
                         }
+
+                        // Re-upload files to get fresh file IDs
+                        UploadAttachments(llm, resolved, provider, apiKey, model, settings.MaxTokens);
+
                         result = llm.CompleteAsync(resolved, apiKey, model, settings, ct: CancellationToken.None)
                             .GetAwaiter().GetResult();
                     }
