@@ -320,12 +320,19 @@ public static class UseAiFunction
             // ── Tier 1: Upload original file ──
             bool skipOriginal = false;
 
-            // Anthropic limits PDFs to 100 pages
-            if (provider == ProviderName.Anthropic && att.MimeType == "application/pdf")
+            if (provider == ProviderName.Anthropic)
             {
-                byte[] pdfBytes = att.RawBytes ?? (System.IO.File.Exists(att.SourcePath) ? System.IO.File.ReadAllBytes(att.SourcePath) : null);
-                if (pdfBytes != null && ContentExtractor.GetPdfPageCount(pdfBytes) > 100)
+                // Anthropic document blocks only support PDF and plaintext
+                if (att.MimeType != "application/pdf" && att.MimeType != "text/plain")
                     skipOriginal = true;
+
+                // Anthropic limits PDFs to 100 pages
+                if (att.MimeType == "application/pdf")
+                {
+                    byte[] pdfBytes = att.RawBytes ?? (System.IO.File.Exists(att.SourcePath) ? System.IO.File.ReadAllBytes(att.SourcePath) : null);
+                    if (pdfBytes != null && ContentExtractor.GetPdfPageCount(pdfBytes) > 100)
+                        skipOriginal = true;
+                }
             }
 
             if (!skipOriginal)
