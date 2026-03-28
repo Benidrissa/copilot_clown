@@ -87,7 +87,8 @@ public static class ModelRegistry
 
     public static readonly ModelInfo[] OpenAIModels = new ModelInfo[]
     {
-        // GPT-5 series (280K total context: 272K input + 8K output)
+        // GPT-5 series
+        new ModelInfo("gpt-5.4", "GPT-5.4", ProviderName.OpenAI, 1_050_000, "High"),
         new ModelInfo("gpt-5.2", "GPT-5.2", ProviderName.OpenAI, 280_000, "High"),
         new ModelInfo("gpt-5.1", "GPT-5.1", ProviderName.OpenAI, 280_000, "High"),
         new ModelInfo("gpt-5", "GPT-5", ProviderName.OpenAI, 280_000, "High"),
