@@ -202,8 +202,30 @@ public static class UseAiFunction
                     if (resolved.HasAttachments)
                         UploadAttachments(llm, resolved, provider, apiKey, model, settings.MaxTokens);
 
-                    var result = llm.CompleteAsync(resolved, apiKey, model, settings, ct: CancellationToken.None)
-                        .GetAwaiter().GetResult();
+                    CompletionResponse result;
+                    try
+                    {
+                        result = llm.CompleteAsync(resolved, apiKey, model, settings, ct: CancellationToken.None)
+                            .GetAwaiter().GetResult();
+                    }
+                    catch (ApiException ex) when (ex.StatusCode == 404 && ex.Message.Contains("not found"))
+                    {
+                        // File IDs expired on the provider side — evict from cache,
+                        // clear RemoteFileId so providers fall back to inline content, and retry.
+                        foreach (var att in resolved.Attachments)
+                        {
+                            if (!string.IsNullOrEmpty(att.RemoteFileId))
+                            {
+                                if (IsUrl(att.SourcePath))
+                                    UploadCache.RemoveUrl(provider, att.SourcePath);
+                                else
+                                    UploadCache.Remove(provider, att.SourcePath);
+                                att.RemoteFileId = null;
+                            }
+                        }
+                        result = llm.CompleteAsync(resolved, apiKey, model, settings, ct: CancellationToken.None)
+                            .GetAwaiter().GetResult();
+                    }
 
                     // Strip markdown ONCE, then cache the clean version
                     var cleanText = StripMarkdown(result.Text.Trim());

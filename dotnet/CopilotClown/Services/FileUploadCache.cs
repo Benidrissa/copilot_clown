@@ -71,6 +71,23 @@ public class FileUploadCache
         Interlocked.Increment(ref _uploads);
     }
 
+    /// <summary>
+    /// Remove a cached file_id for a local file (e.g., when the remote file has expired).
+    /// </summary>
+    public void Remove(ProviderName provider, string sourcePath)
+    {
+        var key = BuildKey(provider, sourcePath);
+        if (key != null) Cache.Remove(key);
+    }
+
+    /// <summary>
+    /// Remove a cached file_id for a URL.
+    /// </summary>
+    public void RemoveUrl(ProviderName provider, string url)
+    {
+        Cache.Remove($"upload_{provider}_{url}");
+    }
+
     public void Clear()
     {
         Cache.Trim(100);
