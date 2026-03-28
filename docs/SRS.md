@@ -53,7 +53,7 @@ The add-in provides:
 
 - Excel-DNA: https://excel-dna.net/
 - Anthropic Claude API: https://docs.anthropic.com/en/docs/api-reference
-- OpenAI Chat Completions API: https://platform.openai.com/docs/api-reference/chat
+- OpenAI Responses API: https://developers.openai.com/api/docs/guides/file-inputs
 - Microsoft COPILOT function documentation (source specification)
 
 ---
@@ -323,7 +323,7 @@ Unsupported file types are silently skipped.
 When attachments include images, the API request uses a multimodal content array:
 
 - **Anthropic Claude:** `content` becomes an array of `{"type":"text",...}` and `{"type":"image","source":{"type":"base64",...}}` blocks. When a `file_id` is available (see §3.6), file references are used instead: `{"type":"document","source":{"type":"file","file_id":"..."}}` or `{"type":"image","source":{"type":"file","file_id":"..."}}`. Prompt caching (`cache_control`) is applied to attachment blocks.
-- **OpenAI:** `content` becomes an array of `{"type":"text",...}` and `{"type":"image_url","image_url":{"url":"data:mime;base64,..."}}` blocks. When a `file_id` is available, file references are used: `{"type":"file","file":{"file_id":"..."}}`.
+- **OpenAI (Responses API):** `content` becomes an array of `{"type":"input_text",...}`, `{"type":"input_image","image_url":"data:mime;base64,..."}`, and `{"type":"input_file","file_id":"..."}` blocks. Supports all file types: PDF, docx, pptx, xlsx, csv, txt, code files. Images are sent as `input_image` (base64), not `input_file`.
 - **Text-only attachments:** Document text is prepended to the prompt as `--- Content from filename ---` sections; no multimodal array needed
 
 #### 3.5.7 File Content Caching
@@ -375,18 +375,21 @@ Both APIs accept multipart form-data uploads with the file bytes and filename.
 | Provider | Document Reference | Image Reference |
 |----------|-------------------|-----------------|
 | **Claude** | `{"type":"document","source":{"type":"file","file_id":"..."},"cache_control":{"type":"ephemeral"}}` | `{"type":"image","source":{"type":"file","file_id":"..."},"cache_control":{"type":"ephemeral"}}` |
-| **OpenAI** | `{"type":"file","file":{"file_id":"..."}}` | `{"type":"file","file":{"file_id":"..."}}` |
+| **OpenAI** | `{"type":"input_file","file_id":"..."}` | `{"type":"input_image","image_url":"data:mime;base64,..."}` |
 
 #### 3.6.4 Claude Prompt Caching
 
-Anthropic's prompt caching is enabled on all attachment content blocks via `"cache_control": {"type": "ephemeral"}`. This provides up to 90% cost reduction when the same files are referenced in subsequent API calls within the caching window.
+Anthropic's prompt caching is enabled on up to 4 attachment content blocks (Anthropic's maximum) via `"cache_control": {"type": "ephemeral"}`. The last 4 attachment blocks closest to the user prompt are prioritized. This provides up to 90% cost reduction when the same files are referenced in subsequent API calls within the caching window.
 
 #### 3.6.5 Upload Flow
 
 1. Before calling the completion API, each attachment is checked against `FileUploadCache`
 2. **Cache hit:** `file_id` is set on the attachment; no upload needed
-3. **Cache miss:** File bytes are uploaded to the provider's Files API; returned `file_id` is cached
-4. **Upload failure:** Falls back silently to inline content (base64 or text)
+3. **Cache miss — Tier 1:** Original file bytes are uploaded to the provider's Files API; returned `file_id` is cached
+4. **Tier 1 failure — Tier 2:** Extracted text is saved as `.txt` and uploaded; returned `file_id` is cached
+5. **Tier 2 failure — Tier 3:** Inline extracted text is sent in the request body
+6. **No content available:** Throws error — audit requires 100% content coverage, no silent drops
+7. **Stale file_id (404):** On "file not found" errors, stale entries are evicted from cache, files are re-uploaded, and the request is retried automatically
 5. The provider's completion request uses `file_id` references where available
 
 #### 3.6.6 File Upload Cache
@@ -448,7 +451,7 @@ Users can define a persistent system prompt that is sent with every API call. Th
 | Provider | System Prompt Format |
 |----------|---------------------|
 | **Anthropic Claude** | Top-level `"system"` field in request body |
-| **OpenAI** | `{"role": "system", "content": "..."}` message at index 0 |
+| **OpenAI** | `{"role": "developer", "content": [{"type": "input_text", "text": "..."}]}` message at index 0 |
 | **Google Gemini** | `systemInstruction.parts[0].text` field |
 
 ### 3.10 Temperature & Parameter Control
@@ -469,9 +472,9 @@ Users can control LLM generation parameters from the Settings dialog to tune out
 
 - Parameters are sent with every API call to all providers
 - Persisted in `settings.json`
-- The `MaxTokens` parameter maps to `max_tokens` (Claude, older OpenAI) or `max_completion_tokens` (GPT-5.x)
+- The `MaxTokens` parameter maps to `max_tokens` (Claude) or `max_output_tokens` (OpenAI Responses API)
 - **Not included in cache key** — changing parameters only affects future API calls
-- Some models may ignore `temperature` or `top_p` (e.g., OpenAI reasoning models o1/o3). The provider silently omits unsupported parameters.
+- Some models may ignore `temperature` or `top_p` (e.g., OpenAI reasoning models o1/o3/o4). The provider silently omits unsupported parameters.
 
 ### 3.11 Google Gemini Provider
 
@@ -740,9 +743,9 @@ When a system prompt is configured (§3.9), it is sent as the top-level `"system
 }
 ```
 
-### 6.2 OpenAI — Chat Completions API
+### 6.2 OpenAI — Responses API
 
-**Endpoint:** `POST https://api.openai.com/v1/chat/completions`
+**Endpoint:** `POST https://api.openai.com/v1/responses`
 
 **Request Headers:**
 ```
@@ -750,45 +753,56 @@ Authorization: Bearer <user_api_key>
 Content-type: application/json
 ```
 
-**Request Body:**
-```json
-{
-  "model": "gpt-4.1-mini",
-  "max_tokens": 8192,
-  "messages": [
-    {
-      "role": "user",
-      "content": "<constructed_prompt>"
-    }
-  ]
-}
-```
-
-Note: GPT-5.x models use `max_completion_tokens` instead of `max_tokens`. When a system prompt is configured (§3.9), it is sent as a `{"role": "system", "content": "..."}` message before the user message. Temperature and Top P (§3.10) are sent as `"temperature"` and `"top_p"` in the request body.
-
+**Request Body (text only):**
 ```json
 {
   "model": "gpt-5.2",
-  "max_completion_tokens": 8192,
-  "messages": [
+  "max_output_tokens": 8192,
+  "input": [
     {
       "role": "user",
-      "content": "<constructed_prompt>"
+      "content": [
+        { "type": "input_text", "text": "<constructed_prompt>" }
+      ]
     }
   ]
 }
 ```
+
+**Request Body (with file attachments):**
+```json
+{
+  "model": "gpt-5.2",
+  "max_output_tokens": 8192,
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "input_file", "file_id": "file-abc123" },
+        { "type": "input_text", "text": "<constructed_prompt>" }
+      ]
+    }
+  ]
+}
+```
+
+Note: When a system prompt is configured (§3.9), it is sent as a `{"role": "developer"}` message before the user message (reasoning models do not support system prompts). Temperature and Top P (§3.10) are sent as `"temperature"` and `"top_p"` in the request body (omitted for reasoning models o1/o3/o4). Images are sent as `{"type": "input_image", "image_url": "data:mime;base64,..."}` blocks, not `input_file`.
 
 **Response (extract):**
 ```json
 {
-  "choices": [
+  "output": [
     {
-      "message": {
-        "content": "<response_text>"
-      }
+      "type": "message",
+      "content": [
+        { "type": "output_text", "text": "<response_text>" }
+      ]
     }
-  ]
+  ],
+  "usage": {
+    "input_tokens": 1234,
+    "output_tokens": 567
+  }
 }
 ```
 
