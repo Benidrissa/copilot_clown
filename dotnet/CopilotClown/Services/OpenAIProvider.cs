@@ -35,46 +35,52 @@ public class OpenAIProvider : ILlmProvider
         ResolvedPrompt prompt, string apiKey, string model, AppSettings settings, CancellationToken ct = default)
     {
         var maxTokens = settings.MaxTokens;
-        var maxTokensKey = GetMaxTokensKey(model);
 
-        object content;
-        if (!prompt.HasAttachments)
+        // Build input content
+        var content = prompt.HasAttachments
+            ? (object)BuildMultimodalContent(prompt)
+            : new object[]
+              {
+                  new Dictionary<string, object> { { "type", "input_text" }, { "text", prompt.CleanText } }
+              };
+
+        // Build input array with optional system message
+        var input = new List<object>();
+
+        if (!string.IsNullOrWhiteSpace(settings.SystemPrompt) && !IsReasoningModel(model))
         {
-            content = prompt.CleanText;
-        }
-        else
-        {
-            content = BuildMultimodalContent(prompt);
+            input.Add(new Dictionary<string, object>
+            {
+                { "role", "developer" },
+                { "content", new object[]
+                    {
+                        new Dictionary<string, object> { { "type", "input_text" }, { "text", settings.SystemPrompt } }
+                    }
+                }
+            });
         }
 
-        var messages = new List<Dictionary<string, object>>();
-        if (!string.IsNullOrWhiteSpace(settings.SystemPrompt))
-            messages.Add(new Dictionary<string, object> { { "role", "system" }, { "content", settings.SystemPrompt } });
-        messages.Add(new Dictionary<string, object> { { "role", "user" }, { "content", content } });
+        input.Add(new Dictionary<string, object>
+        {
+            { "role", "user" },
+            { "content", content }
+        });
 
         var requestBody = new Dictionary<string, object>
         {
             { "model", model },
-            { "messages", messages.ToArray() }
+            { "input", input.ToArray() },
+            { "max_output_tokens", maxTokens }
         };
 
-        requestBody[maxTokensKey] = maxTokens;
-
-        // Reasoning models (o1, o3, o4) don't support temperature, top_p, or system messages
+        // Reasoning models (o1, o3, o4) don't support temperature or top_p
         if (!IsReasoningModel(model))
         {
             requestBody["temperature"] = settings.Temperature;
             requestBody["top_p"] = settings.TopP;
         }
-        else
-        {
-            // Remove system message for reasoning models — they don't support it
-            if (messages.Count > 1 && messages[0].ContainsKey("role") && (string)messages[0]["role"] == "system")
-                messages.RemoveAt(0);
-            requestBody["messages"] = messages.ToArray();
-        }
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/responses")
         {
             Content = new StringContent(JsonHelper.Serialize(requestBody), Encoding.UTF8, "application/json")
         };
@@ -97,9 +103,11 @@ public class OpenAIProvider : ILlmProvider
 
         var json = await response.Content.ReadAsStringAsync();
         var root = JsonHelper.Parse(json);
-        var text = JsonHelper.GetString(root, "choices.0.message.content");
-        var inputTokens = JsonHelper.GetInt(root, "usage.prompt_tokens");
-        var outputTokens = JsonHelper.GetInt(root, "usage.completion_tokens");
+
+        // Responses API: extract text from output[].content[].text
+        var text = ExtractResponseText(root);
+        var inputTokens = JsonHelper.GetInt(root, "usage.input_tokens");
+        var outputTokens = JsonHelper.GetInt(root, "usage.output_tokens");
 
         return new CompletionResponse(text, inputTokens, outputTokens);
     }
@@ -144,22 +152,29 @@ public class OpenAIProvider : ILlmProvider
         }
     }
 
-    private static string GetMaxTokensKey(string model)
-    {
-        // Newer models (GPT-5.x, GPT-4.1, o-series) use max_completion_tokens to unlock
-        // the full context window. Legacy max_tokens can artificially cap input size.
-        if (model.StartsWith("gpt-5", StringComparison.OrdinalIgnoreCase)
-            || model.StartsWith("gpt-4.1", StringComparison.OrdinalIgnoreCase)
-            || IsReasoningModel(model))
-            return "max_completion_tokens";
-        return "max_tokens";
-    }
-
     private static bool IsReasoningModel(string model)
     {
         return model.StartsWith("o1", StringComparison.OrdinalIgnoreCase)
             || model.StartsWith("o3", StringComparison.OrdinalIgnoreCase)
             || model.StartsWith("o4", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Extract text from Responses API output.
+    /// Response shape: { output: [ { type: "message", content: [ { type: "output_text", text: "..." } ] } ] }
+    /// </summary>
+    private static string ExtractResponseText(Dictionary<string, object> root)
+    {
+        // Try output[i].content[j].text for output_text blocks
+        for (int i = 0; i < 10; i++)
+        {
+            var contentText = JsonHelper.GetString(root, $"output.{i}.content.0.text");
+            if (!string.IsNullOrEmpty(contentText))
+                return contentText;
+        }
+        // Fallback: try output_text at top level or single output text
+        var fallback = JsonHelper.GetString(root, "output.0.text");
+        return fallback ?? "";
     }
 
     private static object[] BuildMultimodalContent(ResolvedPrompt prompt)
@@ -173,49 +188,37 @@ public class OpenAIProvider : ILlmProvider
             {
                 blocks.Add(new Dictionary<string, object>
                 {
-                    { "type", "file" },
-                    { "file", new Dictionary<string, object>
-                        {
-                            { "file_id", att.RemoteFileId }
-                        }
-                    }
+                    { "type", "input_file" },
+                    { "file_id", att.RemoteFileId }
                 });
             }
             else
             {
                 blocks.Add(new Dictionary<string, object>
                 {
-                    { "type", "text" },
+                    { "type", "input_text" },
                     { "text", $"--- Content from {att.FileName} ---\n{att.Content}\n--- End ---\n" }
                 });
             }
         }
 
-        // Image attachments: file_id → base64 image_url
+        // Image attachments: file_id → base64 input_image
         foreach (var att in prompt.Attachments.Where(a => a.Type == AttachmentType.Image))
         {
             if (!string.IsNullOrEmpty(att.RemoteFileId))
             {
                 blocks.Add(new Dictionary<string, object>
                 {
-                    { "type", "file" },
-                    { "file", new Dictionary<string, object>
-                        {
-                            { "file_id", att.RemoteFileId }
-                        }
-                    }
+                    { "type", "input_file" },
+                    { "file_id", att.RemoteFileId }
                 });
             }
             else
             {
                 blocks.Add(new Dictionary<string, object>
                 {
-                    { "type", "image_url" },
-                    { "image_url", new Dictionary<string, object>
-                        {
-                            { "url", $"data:{att.MimeType};base64,{att.Content}" }
-                        }
-                    }
+                    { "type", "input_image" },
+                    { "image_url", $"data:{att.MimeType};base64,{att.Content}" }
                 });
             }
         }
@@ -223,7 +226,7 @@ public class OpenAIProvider : ILlmProvider
         // User prompt text (always last)
         blocks.Add(new Dictionary<string, object>
         {
-            { "type", "text" },
+            { "type", "input_text" },
             { "text", prompt.CleanText }
         });
 
