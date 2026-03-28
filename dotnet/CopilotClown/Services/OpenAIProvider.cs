@@ -166,39 +166,23 @@ public class OpenAIProvider : ILlmProvider
     {
         var blocks = new List<object>();
 
-        // Document/text attachments: file_id → base64 input_file → inline text
+        // Document/text attachments: file_id → inline text
         foreach (var att in prompt.Attachments.Where(a => a.Type == AttachmentType.Text))
         {
             if (!string.IsNullOrEmpty(att.RemoteFileId))
             {
-                // Tier 1/2: uploaded file reference
                 blocks.Add(new Dictionary<string, object>
                 {
-                    { "type", "input_file" },
-                    { "input_file", new Dictionary<string, object>
+                    { "type", "file" },
+                    { "file", new Dictionary<string, object>
                         {
                             { "file_id", att.RemoteFileId }
                         }
                     }
                 });
             }
-            else if (att.RawBytes != null && att.RawBytes.Length <= 50 * 1024 * 1024)
-            {
-                // Base64 input_file (no upload needed, supports all file types)
-                blocks.Add(new Dictionary<string, object>
-                {
-                    { "type", "input_file" },
-                    { "input_file", new Dictionary<string, object>
-                        {
-                            { "filename", att.FileName },
-                            { "file_data", $"data:{att.MimeType};base64,{Convert.ToBase64String(att.RawBytes)}" }
-                        }
-                    }
-                });
-            }
             else
             {
-                // Inline text fallback
                 blocks.Add(new Dictionary<string, object>
                 {
                     { "type", "text" },
@@ -214,8 +198,8 @@ public class OpenAIProvider : ILlmProvider
             {
                 blocks.Add(new Dictionary<string, object>
                 {
-                    { "type", "input_file" },
-                    { "input_file", new Dictionary<string, object>
+                    { "type", "file" },
+                    { "file", new Dictionary<string, object>
                         {
                             { "file_id", att.RemoteFileId }
                         }
